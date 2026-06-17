@@ -1,6 +1,6 @@
 # Retriva Local Containerized Deployment
 
-This folder provides a local Docker Compose deployment for development/testing before milestone #1.
+This folder provides a local Docker Compose deployment for development/testing.
 
 It runs:
 
@@ -11,7 +11,7 @@ It runs:
 - Retriva WebUI
 - Retriva connectors profile, currently MediaWiki connector
 
-OpenRouter is used as the OpenAI-compatible LLM provider, so no local LLM server is deployed.
+An existing, remote service is used as the OpenAI-compatible LLM provider, so no local LLM server is deployed.
 
 ## Expected repository layout
 
@@ -84,7 +84,11 @@ If the connector CLI is not yet implemented, use:
 
 ## Notes
 
-- This is a local development deployment, not the milestone #1 sandbox.
+- This is a local development deployment.
 - Ports are bound to localhost where convenient, but Qdrant/Core/Gateway/WebUI are exposed on host ports for debugging.
 - Do not use this unchanged in production.
 - The Compose file intentionally uses `build:` for Retriva services, so it expects local repositories with Dockerfiles.
+
+## Licensing
+
+This project, including all source code, agentic specifications, and documentation, is licensed under the Apache License 2.0. See the LICENSE file for details.
