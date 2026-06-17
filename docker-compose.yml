@@ -1,0 +1,179 @@
+name: retriva-local
+
+networks:
+  retriva-net:
+    name: retriva-local-net
+    driver: bridge
+
+volumes:
+  qdrant_storage:
+  retriva_core_storage:
+  retriva_gateway_storage:
+  mediawiki_connector_state:
+
+services:
+  qdrant:
+    image: ${QDRANT_IMAGE:-qdrant/qdrant:latest}
+    container_name: retriva-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__SERVICE__GRPC_PORT: "6334"
+      QDRANT__TELEMETRY_DISABLED: "${QDRANT_TELEMETRY_DISABLED:-true}"
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  tika:
+    image: ${TIKA_IMAGE:-apache/tika:latest-full}
+    container_name: retriva-tika
+    restart: unless-stopped
+    ports:
+      - "${TIKA_BIND_ADDR:-127.0.0.1}:${TIKA_PORT:-9998}:9998"
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9998' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  retriva-core:
+    build:
+      context: ${RETRIVA_CORE_DIR:-../retriva-core}
+      dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_CORE_IMAGE:-retriva-core:local}
+    container_name: retriva-core
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Service wiring
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      TIKA_URL: ${TIKA_URL:-http://tika:9998}
+
+      # OpenAI-compatible provider: OpenRouter
+      OPENAI_API_BASE: ${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENAI_API_KEY: ${OPENROUTER_API_KEY}
+      LLM_PROVIDER_BASE_URL: ${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_API_KEY: ${OPENROUTER_API_KEY}
+      CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
+
+      # Local-dev behavior
+      ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
+      LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
+    ports:
+      - "${CORE_PORT:-8001}:8001"
+    volumes:
+      - retriva_core_storage:/app/storage
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      tika:
+        condition: service_healthy
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${CORE_INTERNAL_PORT:-8001}/health || curl -fsS http://127.0.0.1:${CORE_INTERNAL_PORT:-8001}/docs || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  retriva-gateway:
+    build:
+      context: ${RETRIVA_GATEWAY_DIR:-../retriva-gateway}
+      dockerfile: ${RETRIVA_GATEWAY_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_GATEWAY_IMAGE:-retriva-gateway:local}
+    container_name: retriva-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      RETRIVA_CORE_BASE_URL: ${RETRIVA_CORE_BASE_URL:-http://retriva-core:8001}
+      CORE_BASE_URL: ${CORE_BASE_URL:-http://retriva-core:8001}
+      DYNAMIC_INGESTION_ENABLED: ${DYNAMIC_INGESTION_ENABLED:-true}
+      CONNECTOR_SERVICE_TOKEN: ${CONNECTOR_SERVICE_TOKEN:-local-dev-service-token}
+      LOG_LEVEL: ${GATEWAY_LOG_LEVEL:-INFO}
+    ports:
+      - "${GATEWAY_PORT:-8002}:8002"
+    volumes:
+      - retriva_gateway_storage:/app/storage
+    depends_on:
+      retriva-core:
+        condition: service_started
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${GATEWAY_INTERNAL_PORT:-8002}/gateway/health || curl -fsS http://127.0.0.1:${GATEWAY_INTERNAL_PORT:-8002}/docs || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  retriva-mediawiki-connector:
+    build:
+      context: ${RETRIVA_MEDIAWIKI_CONNECTOR_DIR:-../retriva-mediawiki-connector}
+      dockerfile: ${RETRIVA_MEDIAWIKI_CONNECTOR_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_MEDIAWIKI_CONNECTOR_IMAGE:-retriva-mediawiki-connector:local}
+    container_name: retriva-mediawiki-connector
+    restart: "no"
+    profiles: ["connectors"]
+    env_file:
+      - .env
+    environment:
+      GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://retriva-gateway:8002}
+      RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL:-http://retriva-gateway:8002}
+      CONNECTOR_SERVICE_TOKEN: ${CONNECTOR_SERVICE_TOKEN:-local-dev-service-token}
+      MEDIAWIKI_API_URL: ${MEDIAWIKI_API_URL:-}
+      MEDIAWIKI_AUTH_MODE: ${MEDIAWIKI_AUTH_MODE:-none}
+      MEDIAWIKI_USERNAME: ${MEDIAWIKI_USERNAME:-}
+      MEDIAWIKI_BOT_PASSWORD: ${MEDIAWIKI_BOT_PASSWORD:-}
+      MEDIAWIKI_SOURCE_ID: ${MEDIAWIKI_SOURCE_ID:-src_local_mediawiki}
+      MEDIAWIKI_TARGET_KB_ID: ${MEDIAWIKI_TARGET_KB_ID:-default}
+      MEDIAWIKI_CONFIG: /app/config/mediawiki.yaml
+      LOCAL_STATE_STORE_PATH: /app/state/mediawiki-connector-cache.sqlite
+    volumes:
+      - ./config/mediawiki.yaml:/app/config/mediawiki.yaml:ro
+      - mediawiki_connector_state:/app/state
+    depends_on:
+      retriva-gateway:
+        condition: service_started
+    networks:
+      - retriva-net
+    command: ${MEDIAWIKI_CONNECTOR_COMMAND:-sleep infinity}
+
+  retriva-webui:
+    build:
+      context: ${RETRIVA_WEBUI_DIR:-../retriva-webui}
+      dockerfile: ${RETRIVA_WEBUI_DOCKERFILE:-Dockerfile}
+      args:
+        VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:8002}
+    image: ${RETRIVA_WEBUI_IMAGE:-retriva-webui:local}
+    container_name: retriva-webui
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:8002}
+      RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL_FOR_WEBUI:-http://retriva-gateway:8002}
+    ports:
+      - "${WEBUI_PORT:-5173}:5173"
+    depends_on:
+      retriva-gateway:
+        condition: service_started
+    networks:
+      - retriva-net
