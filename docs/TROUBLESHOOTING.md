@@ -42,7 +42,7 @@ http://localhost:8002
 Check:
 
 ```bash
-grep OPENROUTER_API_KEY .env
+grep OPENAI_PROVIDER_API_KEY .env
 ./scripts/manage.sh logs retriva-core
 ```
 

@@ -18,7 +18,7 @@ echo
 cat <<'EOF'
 Next steps:
 1. Edit .env
-   - Set OPENROUTER_API_KEY
+   - Set OPENAI_PROVIDER_API_KEY
    - Check RETRIVA_*_DIR paths
    - Set MEDIAWIKI_* only if testing connector
 2. Run:

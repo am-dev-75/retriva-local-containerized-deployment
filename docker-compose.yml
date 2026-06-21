@@ -10,6 +10,7 @@ volumes:
   retriva_core_storage:
   retriva_gateway_storage:
   mediawiki_connector_state:
+  whisper_models:
 
 services:
   qdrant:
@@ -49,6 +50,81 @@ services:
       retries: 20
       start_period: 20s
 
+  whisper-init:
+    image: alpine:latest
+    container_name: retriva-whisper-init
+    command: >
+      sh -c "
+      if [ ! -f /models/${WHISPER_MODEL:-ggml-base.en.bin} ]; then
+        echo 'Downloading Whisper model...';
+        wget -q -O /models/${WHISPER_MODEL:-ggml-base.en.bin} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL:-ggml-base.en.bin};
+      else
+        echo 'Whisper model already exists.';
+      fi"
+    volumes:
+      - whisper_models:/models
+
+  whisper:
+    image: ${WHISPER_IMAGE:-ghcr.io/ggerganov/whisper.cpp:main}
+    container_name: retriva-whisper
+    restart: unless-stopped
+    ports:
+      - "${WHISPER_PORT:-8080}:${WHISPER_PORT:-8080}"
+    command: /app/build/bin/whisper-server -m /models/${WHISPER_MODEL:-ggml-base.en.bin} --host 0.0.0.0 --port ${WHISPER_PORT:-8080}
+    volumes:
+      - whisper_models:/models
+    depends_on:
+      whisper-init:
+        condition: service_completed_successfully
+    networks:
+      - retriva-net
+
+  retriva-ingestion:
+    build:
+      context: ${RETRIVA_CORE_DIR:-../retriva-core}
+      dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_INGESTION_IMAGE:-retriva-ingestion:local}
+    container_name: retriva-ingestion
+    command: python -m retriva.ingestion_api --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    env_file:
+      - ${ENV_FILE:-.env}
+    environment:
+      # Service wiring
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-retriva_chunks}
+      TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
+
+      # OpenAI-compatible provider: OpenRouter
+      OPENAI_API_BASE: ${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      LLM_PROVIDER_BASE_URL: ${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
+
+      # Local-dev behavior
+      ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
+      LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
+    ports:
+      - "${INGESTION_PORT:-8000}:8000"
+    volumes:
+      - retriva_core_storage:/app/storage
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      tika:
+        condition: service_healthy
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${CORE_INTERNAL_PORT:-8000}/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
   retriva-core:
     build:
       context: ${RETRIVA_CORE_DIR:-../retriva-core}
@@ -57,18 +133,19 @@ services:
     container_name: retriva-core
     restart: unless-stopped
     env_file:
-      - .env
+      - ${ENV_FILE:-.env}
     environment:
       # Service wiring
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      TIKA_URL: ${TIKA_URL:-http://tika:9998}
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-retriva_chunks}
+      TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
 
       # OpenAI-compatible provider: OpenRouter
       OPENAI_API_BASE: ${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
-      OPENAI_API_KEY: ${OPENROUTER_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
       LLM_PROVIDER_BASE_URL: ${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}
-      LLM_API_KEY: ${OPENROUTER_API_KEY}
+      LLM_API_KEY: ${OPENAI_PROVIDER_API_KEY}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
 
@@ -101,13 +178,15 @@ services:
     container_name: retriva-gateway
     restart: unless-stopped
     env_file:
-      - .env
+      - ${ENV_FILE:-.env}
     environment:
-      RETRIVA_CORE_BASE_URL: ${RETRIVA_CORE_BASE_URL:-http://retriva-core:8001}
-      CORE_BASE_URL: ${CORE_BASE_URL:-http://retriva-core:8001}
+      RETRIVA_CORE_INGESTION_URL: ${RETRIVA_CORE_INGESTION_URL:-http://retriva-ingestion:8000}
+      RETRIVA_CORE_CHAT_URL: ${RETRIVA_CORE_CHAT_URL:-http://retriva-core:8001}
       DYNAMIC_INGESTION_ENABLED: ${DYNAMIC_INGESTION_ENABLED:-true}
-      CONNECTOR_SERVICE_TOKEN: ${CONNECTOR_SERVICE_TOKEN:-local-dev-service-token}
+      GATEWAY_INTERNAL_SERVICE_TOKEN: ${GATEWAY_INTERNAL_SERVICE_TOKEN:-local-dev-service-token}
       LOG_LEVEL: ${GATEWAY_LOG_LEVEL:-INFO}
+      STT_ENABLED: ${STT_ENABLED:-true}
+      WHISPER_SERVER_URL: ${WHISPER_SERVER_URL:-http://whisper:${WHISPER_PORT:-8080}/inference}
     ports:
       - "${GATEWAY_PORT:-8002}:8002"
     volumes:
@@ -133,17 +212,17 @@ services:
     restart: "no"
     profiles: ["connectors"]
     env_file:
-      - .env
+      - ${ENV_FILE:-.env}
     environment:
       GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://retriva-gateway:8002}
       RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL:-http://retriva-gateway:8002}
-      CONNECTOR_SERVICE_TOKEN: ${CONNECTOR_SERVICE_TOKEN:-local-dev-service-token}
-      MEDIAWIKI_API_URL: ${MEDIAWIKI_API_URL:-}
-      MEDIAWIKI_AUTH_MODE: ${MEDIAWIKI_AUTH_MODE:-none}
-      MEDIAWIKI_USERNAME: ${MEDIAWIKI_USERNAME:-}
-      MEDIAWIKI_BOT_PASSWORD: ${MEDIAWIKI_BOT_PASSWORD:-}
-      MEDIAWIKI_SOURCE_ID: ${MEDIAWIKI_SOURCE_ID:-src_local_mediawiki}
-      MEDIAWIKI_TARGET_KB_ID: ${MEDIAWIKI_TARGET_KB_ID:-default}
+      GATEWAY_INTERNAL_SERVICE_TOKEN: ${GATEWAY_INTERNAL_SERVICE_TOKEN:-local-dev-service-token}
+      MEDIAWIKI_CONNECTOR_API_URL: ${MEDIAWIKI_CONNECTOR_API_URL:-}
+      MEDIAWIKI_CONNECTOR_AUTH_MODE: ${MEDIAWIKI_CONNECTOR_AUTH_MODE:-none}
+      MEDIAWIKI_CONNECTOR_USERNAME: ${MEDIAWIKI_CONNECTOR_USERNAME:-}
+      MEDIAWIKI_CONNECTOR_BOT_PASSWORD: ${MEDIAWIKI_CONNECTOR_BOT_PASSWORD:-}
+      MEDIAWIKI_CONNECTOR_SOURCE_ID: ${MEDIAWIKI_CONNECTOR_SOURCE_ID:-src_local_mediawiki}
+      MEDIAWIKI_CONNECTOR_TARGET_KB_ID: ${MEDIAWIKI_CONNECTOR_TARGET_KB_ID:-default}
       MEDIAWIKI_CONFIG: /app/config/mediawiki.yaml
       LOCAL_STATE_STORE_PATH: /app/state/mediawiki-connector-cache.sqlite
     volumes:
@@ -166,10 +245,11 @@ services:
     container_name: retriva-webui
     restart: unless-stopped
     env_file:
-      - .env
+      - ${ENV_FILE:-.env}
     environment:
       VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:8002}
       RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL_FOR_WEBUI:-http://retriva-gateway:8002}
+      VITE_SPEECH_INPUT_MODE: ${VITE_SPEECH_INPUT_MODE:-gateway}
     ports:
       - "${WEBUI_PORT:-5173}:5173"
     depends_on:

@@ -1,5 +1,7 @@
 # Retriva Local Containerized Deployment
 
+Version: 0.1.0
+
 This folder provides a local Docker Compose deployment for development/testing.
 
 It runs:
@@ -9,6 +11,7 @@ It runs:
 - Retriva Core
 - Retriva Gateway
 - Retriva WebUI
+- Whisper Server (for WebUI Speech-to-Text)
 - Retriva connectors profile, currently MediaWiki connector
 
 An existing, remote service is used as the OpenAI-compatible LLM provider, so no local LLM server is deployed.
@@ -53,14 +56,17 @@ Gateway:        http://localhost:8002
 Core:           http://localhost:8001
 Qdrant UI:      http://localhost:6333/dashboard
 Tika:           http://localhost:9998
+Whisper Server: http://localhost:8100
 ```
 
-## Run connector commands
+## Connectors & `up` vs `up-with-connectors`
 
-The connector service is under the `connectors` Compose profile. It does not run by default.
+- **`./scripts/manage.sh up`**: Starts only the default core services (`qdrant`, `tika`, `whisper`, `retriva-core`, `retriva-gateway`, `retriva-webui`). It deliberately ignores optional connectors.
+- **`./scripts/manage.sh up-with-connectors`**: Starts all the default core services **plus** any services grouped under the `connectors` Docker Compose profile (like `retriva-mediawiki-connector`).
+
+Once the connector services are running, you can execute their specific commands:
 
 ```bash
-./scripts/manage.sh up-with-connectors
 ./scripts/manage.sh connector-validate
 ./scripts/manage.sh connector-sync
 ```
@@ -69,6 +75,22 @@ If the connector CLI is not yet implemented, use:
 
 ```bash
 ./scripts/manage.sh connector-shell
+```
+
+## Excluding Services
+
+You can optionally exclude specific services from being built or started by passing the `--exclude <service_name>` flag to the `manage.sh` script. This is especially useful if you haven't cloned an optional service (like `retriva-mediawiki-connector`) and want to avoid build or startup errors.
+
+You can use the `--exclude` flag multiple times to exclude multiple services. The flag must be placed before the command.
+
+Example, build all default services except the web UI:
+```bash
+./scripts/manage.sh --exclude retriva-webui build
+```
+
+Example, start all services with connectors profile except the MediaWiki connector:
+```bash
+./scripts/manage.sh --exclude retriva-mediawiki-connector up-with-connectors
 ```
 
 ## Common operations
@@ -82,12 +104,54 @@ If the connector CLI is not yet implemented, use:
 ./scripts/manage.sh purge
 ```
 
+## Overriding Settings Globally
+
+You can override any application setting (such as `QDRANT_COLLECTION_NAME`, port numbers, or API keys) by editing your `.env` file. 
+
+If your containers are already up and running, you do not need to tear them down completely. After modifying `.env`, simply run:
+
+```bash
+./scripts/manage.sh up
+```
+
+Docker Compose will automatically detect that the environment variables have changed and will recreate only the affected containers, while leaving the rest running without interruption.
+
+### MediaWiki Connector Settings
+
+For the Retriva MediaWiki Connector, configuration parameters defined in `config.yaml` can be overridden using environment variables prefixed with `MEDIAWIKI_CONNECTOR_`. 
+
+For example, to override `sync_interval_minutes` and `target_kb_id` globally, you would add:
+```env
+MEDIAWIKI_CONNECTOR_SYNC_INTERVAL_MINUTES=30
+MEDIAWIKI_CONNECTOR_TARGET_KB_ID=my_custom_kb
+```
+Note: Secrets (like `MEDIAWIKI_BOT_PASSWORD`) don't require this prefix and use their standard names.
+## Managing Multiple Deployments (Tagging)
+
+If you need to manage multiple deployments side-by-side (e.g., one for Customer A and one for Customer B), you can use the `COMPOSE_PROJECT_NAME` variable.
+
+Docker Compose uses this name to namespace all containers, volumes, and networks. 
+
+To create a separated deployment:
+1. Copy `.env` to a new file, e.g., `.env.customer-a`
+2. Inside `.env.customer-a`, change `COMPOSE_PROJECT_NAME` to a unique tag:
+   ```env
+   COMPOSE_PROJECT_NAME=retriva-customer-a
+   ```
+3. Run `manage.sh` using the new environment file:
+   ```bash
+   ENV_FILE=.env.customer-a ./scripts/manage.sh up
+   ```
+
+Because the project name is different, Docker will start a completely separate set of containers and create independent volumes (e.g., `retriva-customer-a_qdrant_storage`) that won't conflict with your other deployments!
+
 ## Notes
 
 - This is a local development deployment.
-- Ports are bound to localhost where convenient, but Qdrant/Core/Gateway/WebUI are exposed on host ports for debugging.
+- Ports are bound to localhost where convenient, but Qdrant/Core/Gateway/WebUI/Whisper are exposed on host ports for debugging.
 - Do not use this unchanged in production.
 - The Compose file intentionally uses `build:` for Retriva services, so it expects local repositories with Dockerfiles.
+- The `whisper-init` container automatically downloads the `ggml-base.en.bin` model (or the model specified by `WHISPER_MODEL` in `.env`) from HuggingFace to the local volume before starting the whisper-server.
 
 ## Licensing
 

@@ -2,8 +2,41 @@
 set -euo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
-ENV_FILE="${ENV_FILE:-.env}"
+export ENV_FILE="${ENV_FILE:-.env}"
+
 PROJECT_NAME="${PROJECT_NAME:-retriva-local}"
+if [[ -f "$ENV_FILE" ]]; then
+  ENV_PROJECT_NAME=$(grep -E '^COMPOSE_PROJECT_NAME=' "$ENV_FILE" | cut -d '=' -f 2- || true)
+  if [[ -n "$ENV_PROJECT_NAME" ]]; then
+    PROJECT_NAME="$ENV_PROJECT_NAME"
+  fi
+fi
+
+EXCLUDED_SERVICES=()
+ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --exclude)
+      if [[ -z "${2:-}" ]]; then
+        echo "ERROR: --exclude requires a service name." >&2
+        exit 1
+      fi
+      EXCLUDED_SERVICES+=("$2")
+      shift 2
+      ;;
+    *)
+      ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+set -- "${ARGS[@]:-}"
+COMMAND="${1:-help}"
+if [[ ${#ARGS[@]} -gt 0 ]]; then
+  shift
+fi
 
 compose() {
   docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
@@ -16,11 +49,11 @@ require_env() {
   fi
 }
 
-case "${1:-help}" in
+case "$COMMAND" in
   init)
     if [[ ! -f .env ]]; then
       cp .env.example .env
-      echo "Created .env from .env.example. Edit OPENROUTER_API_KEY and repository paths before starting."
+      echo "Created .env from .env.example. Edit OPENAI_PROVIDER_API_KEY and repository paths before starting."
     else
       echo ".env already exists; leaving it unchanged."
     fi
@@ -45,17 +78,45 @@ case "${1:-help}" in
 
   build)
     require_env
-    compose build
+    if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
+      SERVICES=$(compose config --services)
+      for ex in "${EXCLUDED_SERVICES[@]}"; do
+        SERVICES=$(echo "$SERVICES" | grep -v "^${ex}$" || true)
+      done
+      if [[ -z "$SERVICES" ]]; then
+        echo "No services to build after exclusions."
+        exit 0
+      fi
+      SERVICES=$(echo "$SERVICES" | tr '\n' ' ')
+      compose build $SERVICES
+    else
+      compose build
+    fi
     ;;
 
   up)
     require_env
-    compose up -d qdrant tika retriva-core retriva-gateway retriva-webui
+    SERVICES="qdrant tika whisper retriva-ingestion retriva-core retriva-gateway retriva-webui"
+    if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
+      for ex in "${EXCLUDED_SERVICES[@]}"; do
+        SERVICES=$(echo "$SERVICES" | tr ' ' '\n' | grep -v "^${ex}$" | tr '\n' ' ' || true)
+      done
+    fi
+    compose up -d $SERVICES
     ;;
 
   up-with-connectors)
     require_env
-    compose --profile connectors up -d
+    if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
+      SERVICES=$(compose --profile connectors config --services)
+      for ex in "${EXCLUDED_SERVICES[@]}"; do
+        SERVICES=$(echo "$SERVICES" | grep -v "^${ex}$" || true)
+      done
+      SERVICES=$(echo "$SERVICES" | tr '\n' ' ')
+      compose --profile connectors up -d $SERVICES
+    else
+      compose --profile connectors up -d
+    fi
     ;;
 
   down)
@@ -103,12 +164,12 @@ case "${1:-help}" in
     compose --profile connectors run --rm retriva-mediawiki-connector retriva-mediawiki-connector sync --config /app/config/mediawiki.yaml
     ;;
 
-  clean)
+  delete-containers|clean)
     require_env
     compose down --remove-orphans
     ;;
 
-  purge)
+  delete-volumes|purge)
     require_env
     echo "This will remove containers and named volumes for $PROJECT_NAME. Press Ctrl+C to abort, Enter to continue."
     read -r _
@@ -117,7 +178,10 @@ case "${1:-help}" in
 
   help|*)
     cat <<'EOF'
-Usage: ./scripts/manage.sh <command>
+Usage: ./scripts/manage.sh [--exclude <service>] <command>
+
+Options:
+  --exclude <service> Exclude a specific service (can be used multiple times)
 
 Commands:
   init                Create .env and local folders
@@ -133,6 +197,8 @@ Commands:
   connector-shell     Open shell in MediaWiki connector container
   connector-validate  Run connector validate command
   connector-sync      Run connector sync command
+  delete-containers   Stop and remove containers (alias for clean)
+  delete-volumes      Stop and remove containers and volumes (alias for purge)
   clean               Stop and remove containers, keep volumes
   purge               Stop and remove containers and volumes
 EOF
