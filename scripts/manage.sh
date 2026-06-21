@@ -4,6 +4,15 @@ set -euo pipefail
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 export ENV_FILE="${ENV_FILE:-.env}"
 
+# Automatically detect host timezone and export it for docker-compose
+if [[ -f /etc/timezone ]]; then
+  export TZ=$(cat /etc/timezone)
+elif [[ -L /etc/localtime ]]; then
+  export TZ=$(readlink /etc/localtime | sed "s|.*zoneinfo/||")
+else
+  export TZ="UTC"
+fi
+
 PROJECT_NAME="${PROJECT_NAME:-retriva-local}"
 if [[ -f "$ENV_FILE" ]]; then
   ENV_PROJECT_NAME=$(grep -E '^COMPOSE_PROJECT_NAME=' "$ENV_FILE" | cut -d '=' -f 2- || true)
@@ -126,7 +135,7 @@ case "$COMMAND" in
 
   restart)
     require_env
-    compose restart ${2:-}
+    compose restart "$@"
     ;;
 
   ps)
