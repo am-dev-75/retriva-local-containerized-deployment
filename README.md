@@ -1,6 +1,6 @@
 # Retriva Local Containerized Deployment
 
-Version: 0.1.0
+Version: 1.2.0
 
 This folder provides a local Docker Compose deployment for development/testing.
 
@@ -8,6 +8,7 @@ It runs:
 
 - Qdrant
 - Apache Tika
+- Retriva Ingestion
 - Retriva Core
 - Retriva Gateway
 - Retriva WebUI
@@ -54,6 +55,7 @@ Useful service URLs:
 WebUI:          http://localhost:5173
 Gateway:        http://localhost:8002
 Core:           http://localhost:8001
+Ingestion:      http://localhost:8000
 Qdrant UI:      http://localhost:6333/dashboard
 Tika:           http://localhost:9998
 Whisper Server: http://localhost:8100
@@ -61,7 +63,7 @@ Whisper Server: http://localhost:8100
 
 ## Connectors & `up` vs `up-with-connectors`
 
-- **`./scripts/manage.sh up`**: Starts only the default core services (`qdrant`, `tika`, `whisper`, `retriva-core`, `retriva-gateway`, `retriva-webui`). It deliberately ignores optional connectors.
+- **`./scripts/manage.sh up`**: Starts only the default core services (`qdrant`, `tika`, `whisper`, `retriva-ingestion`, `retriva-core`, `retriva-gateway`, `retriva-webui`). It deliberately ignores optional connectors.
 - **`./scripts/manage.sh up-with-connectors`**: Starts all the default core services **plus** any services grouped under the `connectors` Docker Compose profile (like `retriva-mediawiki-connector`).
 
 Once the connector services are running, you can execute their specific commands:
@@ -148,7 +150,7 @@ Because the project name is different, Docker will start a completely separate s
 ## Notes
 
 - This is a local development deployment.
-- Ports are bound to localhost where convenient, but Qdrant/Core/Gateway/WebUI/Whisper are exposed on host ports for debugging.
+- Ports are bound to localhost where convenient, but Qdrant/Ingestion/Core/Gateway/WebUI/Whisper are exposed on host ports for debugging.
 - Do not use this unchanged in production.
 - The Compose file intentionally uses `build:` for Retriva services, so it expects local repositories with Dockerfiles.
 - The `whisper-init` container automatically downloads the `ggml-base.en.bin` model (or the model specified by `WHISPER_MODEL` in `.env`) from HuggingFace to the local volume before starting the whisper-server.
