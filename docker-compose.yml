@@ -23,6 +23,7 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
     environment:
+      TZ: ${TZ:-UTC}
       QDRANT__SERVICE__HTTP_PORT: "6333"
       QDRANT__SERVICE__GRPC_PORT: "6334"
       QDRANT__TELEMETRY_DISABLED: "${QDRANT_TELEMETRY_DISABLED:-true}"
@@ -41,6 +42,8 @@ services:
     restart: unless-stopped
     ports:
       - "${TIKA_BIND_ADDR:-127.0.0.1}:${TIKA_PORT:-9998}:9998"
+    environment:
+      TZ: ${TZ:-UTC}
     networks:
       - retriva-net
     healthcheck:
@@ -71,6 +74,8 @@ services:
     ports:
       - "${WHISPER_PORT:-8080}:${WHISPER_PORT:-8080}"
     command: /app/build/bin/whisper-server -m /models/${WHISPER_MODEL:-ggml-base.en.bin} --host 0.0.0.0 --port ${WHISPER_PORT:-8080}
+    environment:
+      TZ: ${TZ:-UTC}
     volumes:
       - whisper_models:/models
     depends_on:
@@ -90,6 +95,7 @@ services:
     env_file:
       - ${ENV_FILE:-.env}
     environment:
+      TZ: ${TZ:-UTC}
       # Service wiring
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-retriva_chunks}
@@ -99,6 +105,7 @@ services:
       OPENAI_API_BASE: ${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
       OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      OPENROUTER_OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
       LLM_PROVIDER_BASE_URL: ${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}
       LLM_API_KEY: ${OPENAI_PROVIDER_API_KEY}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
@@ -135,6 +142,7 @@ services:
     env_file:
       - ${ENV_FILE:-.env}
     environment:
+      TZ: ${TZ:-UTC}
       # Service wiring
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-retriva_chunks}
@@ -144,6 +152,7 @@ services:
       OPENAI_API_BASE: ${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
       OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      OPENROUTER_OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
       LLM_PROVIDER_BASE_URL: ${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}
       LLM_API_KEY: ${OPENAI_PROVIDER_API_KEY}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
@@ -180,6 +189,7 @@ services:
     env_file:
       - ${ENV_FILE:-.env}
     environment:
+      TZ: ${TZ:-UTC}
       RETRIVA_CORE_INGESTION_URL: ${RETRIVA_CORE_INGESTION_URL:-http://retriva-ingestion:8000}
       RETRIVA_CORE_CHAT_URL: ${RETRIVA_CORE_CHAT_URL:-http://retriva-core:8001}
       DYNAMIC_INGESTION_ENABLED: ${DYNAMIC_INGESTION_ENABLED:-true}
@@ -214,6 +224,7 @@ services:
     env_file:
       - ${ENV_FILE:-.env}
     environment:
+      TZ: ${TZ:-UTC}
       GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://retriva-gateway:8002}
       RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL:-http://retriva-gateway:8002}
       GATEWAY_INTERNAL_SERVICE_TOKEN: ${GATEWAY_INTERNAL_SERVICE_TOKEN:-local-dev-service-token}
@@ -241,15 +252,18 @@ services:
       dockerfile: ${RETRIVA_WEBUI_DOCKERFILE:-Dockerfile}
       args:
         VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:8002}
+        VITE_RETRIVA_ENABLE_VOICE_INPUT: ${VITE_RETRIVA_ENABLE_VOICE_INPUT:-true}
     image: ${RETRIVA_WEBUI_IMAGE:-retriva-webui:local}
     container_name: retriva-webui
     restart: unless-stopped
     env_file:
       - ${ENV_FILE:-.env}
     environment:
+      TZ: ${TZ:-UTC}
       VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:8002}
       RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL_FOR_WEBUI:-http://retriva-gateway:8002}
       VITE_SPEECH_INPUT_MODE: ${VITE_SPEECH_INPUT_MODE:-gateway}
+      VITE_RETRIVA_ENABLE_VOICE_INPUT: ${VITE_RETRIVA_ENABLE_VOICE_INPUT:-true}
     ports:
       - "${WEBUI_PORT:-5173}:5173"
     depends_on:
