@@ -101,15 +101,20 @@ services:
       QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-retriva_chunks}
       TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
 
-      # OpenAI-compatible provider: OpenRouter
-      OPENAI_API_BASE: ${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
-      OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      # --- OpenAI-compatible provider (default: OpenRouter) ----------------
+      # Retriva core uses ONE key fanned out to every purpose via
+      # model_post_init(), plus PER-PURPOSE base URLs. To redirect ALL
+      # traffic to another provider, set LLM_PROVIDER_BASE_URL in .env; it is
+      # used as the default for embeddings, vision, chat and reranking below.
+      # Override any single purpose by setting its own *_BASE_URL in .env.
       OPENROUTER_OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
-      LLM_PROVIDER_BASE_URL: ${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}
-      LLM_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      RETRIEVAL_RERANK_BASE_URL: ${RETRIEVAL_RERANK_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
+      VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
 
       # Local-dev behavior
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
@@ -148,15 +153,20 @@ services:
       QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-retriva_chunks}
       TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
 
-      # OpenAI-compatible provider: OpenRouter
-      OPENAI_API_BASE: ${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
-      OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      # --- OpenAI-compatible provider (default: OpenRouter) ----------------
+      # Retriva core uses ONE key fanned out to every purpose via
+      # model_post_init(), plus PER-PURPOSE base URLs. To redirect ALL
+      # traffic to another provider, set LLM_PROVIDER_BASE_URL in .env; it is
+      # used as the default for embeddings, vision, chat and reranking below.
+      # Override any single purpose by setting its own *_BASE_URL in .env.
       OPENROUTER_OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
-      LLM_PROVIDER_BASE_URL: ${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}
-      LLM_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      RETRIEVAL_RERANK_BASE_URL: ${RETRIEVAL_RERANK_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
+      VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
 
       # Local-dev behavior
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
