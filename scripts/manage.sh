@@ -105,7 +105,7 @@ case "$COMMAND" in
 
   up)
     require_env
-    SERVICES="qdrant tika whisper retriva-ingestion retriva-core retriva-gateway retriva-webui"
+    SERVICES="qdrant redis tika whisper retriva-ingestion retriva-worker retriva-core retriva-gateway retriva-webui"
     if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
       for ex in "${EXCLUDED_SERVICES[@]}"; do
         SERVICES=$(echo "$SERVICES" | tr ' ' '\n' | grep -v "^${ex}$" | tr '\n' ' ' || true)
@@ -136,6 +136,20 @@ case "$COMMAND" in
   restart)
     require_env
     compose restart "$@"
+    ;;
+
+  rebuild)
+    require_env
+    if [[ $# -eq 0 ]]; then
+      echo "ERROR: rebuild requires at least one service name." >&2
+      echo "Usage: ./scripts/manage.sh rebuild <service> [service ...]" >&2
+      exit 1
+    fi
+    compose build "$@"
+    for svc in "$@"; do
+      compose rm -f -s "$svc" 2>/dev/null || true
+    done
+    compose up -d --no-deps "$@"
     ;;
 
   ps)
@@ -200,6 +214,7 @@ Commands:
   up-with-connectors  Start all services including connector profile
   down                Stop services
   restart [service]   Restart all or one service
+  rebuild <svc> ...   Rebuild and recreate specific services (no deps)
   ps                  Show status
   logs [service]      Follow logs
   health              Basic health checks

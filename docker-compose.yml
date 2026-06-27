@@ -11,6 +11,7 @@ volumes:
   retriva_gateway_storage:
   mediawiki_connector_state:
   whisper_models:
+  redis_data:
 
 services:
   qdrant:
@@ -84,6 +85,25 @@ services:
     networks:
       - retriva-net
 
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    container_name: retriva-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    environment:
+      TZ: ${TZ:-UTC}
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   retriva-ingestion:
     build:
       context: ${RETRIVA_CORE_DIR:-../retriva-core}
@@ -119,6 +139,11 @@ services:
       # Local-dev behavior
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
       LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
+      # ── Celery / Redis ─────────────────────────────────────────────────
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-1}
+      CELERY_TASK_MAX_RETRIES: ${CELERY_TASK_MAX_RETRIES:-3}
     ports:
       - "${INGESTION_PORT:-8000}:8000"
     volumes:
@@ -127,6 +152,8 @@ services:
       qdrant:
         condition: service_healthy
       tika:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - retriva-net
@@ -188,6 +215,53 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
+
+  retriva-worker:
+    build:
+      context: ${RETRIVA_CORE_DIR:-../retriva-core}
+      dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_INGESTION_IMAGE:-retriva-ingestion:local}
+    container_name: retriva-worker
+    command: python -m retriva.ingestion_api.worker
+    restart: unless-stopped
+    env_file:
+      - ${ENV_FILE:-.env}
+    environment:
+      TZ: ${TZ:-UTC}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-retriva_chunks}
+      TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
+      OPENROUTER_OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      RETRIEVAL_RERANK_BASE_URL: ${RETRIEVAL_RERANK_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
+      VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
+      ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
+      LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-1}
+      CELERY_TASK_MAX_RETRIES: ${CELERY_TASK_MAX_RETRIES:-3}
+    volumes:
+      - retriva_core_storage:/app/storage
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      tika:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os,sys; [sys.exit(0) for p in os.listdir('/proc') if p.isdigit() and p!=str(os.getpid()) and 'celery' in open(f'/proc/{p}/cmdline','rb').read().decode(errors='ignore').replace('\\x00',' ')] or sys.exit(1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   retriva-gateway:
     build:
