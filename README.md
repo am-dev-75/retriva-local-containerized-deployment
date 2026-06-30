@@ -1,6 +1,6 @@
 # Retriva Local Containerized Deployment
 
-Version: 1.1.0
+Version: 1.2.0
 
 This folder provides a local Docker Compose deployment for development/testing.
 
