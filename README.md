@@ -1,6 +1,6 @@
 # Retriva Local Containerized Deployment
 
-Version: 1.3.0
+Version: 1.3.1
 
 This folder provides a local Docker Compose deployment for development/testing.
 
@@ -137,7 +137,7 @@ For example, to override `sync_interval_minutes` and `target_kb_id` globally, yo
 MEDIAWIKI_CONNECTOR_SYNC_INTERVAL_MINUTES=30
 MEDIAWIKI_CONNECTOR_TARGET_KB_ID=my_custom_kb
 ```
-Note: Secrets (like `MEDIAWIKI_BOT_PASSWORD`) don't require this prefix and use their standard names.
+Note: Secrets (like `MEDIAWIKI_BOT_PASSWORD`) don't require this prefix and use thAdd support for multiple Mediawiki website instances.eir standard names.
 ## Managing Multiple Deployments (Tagging)
 
 If you need to manage multiple deployments side-by-side (e.g., one for Customer A and one for Customer B), you can use the `COMPOSE_PROJECT_NAME` variable.
