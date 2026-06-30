@@ -13,9 +13,17 @@ It runs:
 - Retriva Gateway
 - Retriva WebUI
 - Whisper Server (for WebUI Speech-to-Text)
-- Retriva connectors profile, currently MediaWiki connector
+- Retriva Pro extensions profile, currently the MediaWiki connector
 
 An existing, remote service is used as the OpenAI-compatible LLM provider, so no local LLM server is deployed.
+
+## Retriva Core vs Retriva Pro
+
+**Retriva Core** (`retriva-core`, `retriva-gateway`, `retriva-webui`) is released under the Apache License 2.0. The default `up` command starts only these components plus infrastructure services (Qdrant, Tika, Redis, Whisper).
+
+**Retriva Pro** is the commercial bundle formed by Retriva Core plus proprietary extension containers. Extensions are licensed separately from the core and are **not** covered by the Apache 2.0 license. The first such extension is `retriva-mediawiki-connector`.
+
+Pro extensions are tagged with the `pro` Docker Compose profile. They are only started when you explicitly request the Pro bundle, so a plain `up` never pulls, builds, or runs proprietary code. This keeps the Apache-2.0-licensed deployment self-contained.
 
 ## Expected repository layout
 
@@ -61,22 +69,24 @@ Tika:           http://localhost:9998
 Whisper Server: http://localhost:8100
 ```
 
-## Connectors & `up` vs `up-with-connectors`
+## Retriva Pro extensions (`up-pro` vs `up`)
 
-- **`./scripts/manage.sh up`**: Starts only the default core services (`qdrant`, `tika`, `whisper`, `retriva-ingestion`, `retriva-core`, `retriva-gateway`, `retriva-webui`). It deliberately ignores optional connectors.
-- **`./scripts/manage.sh up-with-connectors`**: Starts all the default core services **plus** any services grouped under the `connectors` Docker Compose profile (like `retriva-mediawiki-connector`).
+- **`./scripts/manage.sh up`**: Starts only the default core services (`qdrant`, `tika`, `whisper`, `retriva-ingestion`, `retriva-core`, `retriva-gateway`, `retriva-webui`). It deliberately ignores all Pro extension containers, so the running deployment is purely Apache-2.0-licensed code.
+- **`./scripts/manage.sh up-pro`** (alias: `up-with-connectors`): Starts all the default core services **plus** every service tagged with the `pro` Docker Compose profile. This is the Retriva Pro bundle. Each new commercial extension should be added under `profiles: ["pro"]` in `docker-compose.yml`.
 
-Once the connector services are running, you can execute their specific commands:
+Once the Pro services are running, you can execute their specific commands:
 
 ```bash
-./scripts/manage.sh connector-validate
-./scripts/manage.sh connector-sync
+./scripts/manage.sh pro-validate
+./scripts/manage.sh pro-sync
 ```
+
+The `connector-*` commands (`connector-shell`, `connector-validate`, `connector-sync`) are kept as backward-compatible aliases for the `pro-*` commands.
 
 If the connector CLI is not yet implemented, use:
 
 ```bash
-./scripts/manage.sh connector-shell
+./scripts/manage.sh pro-shell
 ```
 
 ## Excluding Services
@@ -90,9 +100,9 @@ Example, build all default services except the web UI:
 ./scripts/manage.sh --exclude retriva-webui build
 ```
 
-Example, start all services with connectors profile except the MediaWiki connector:
+Example, start all Pro services except the MediaWiki connector:
 ```bash
-./scripts/manage.sh --exclude retriva-mediawiki-connector up-with-connectors
+./scripts/manage.sh --exclude retriva-mediawiki-connector up-pro
 ```
 
 ## Common operations
@@ -157,4 +167,12 @@ Because the project name is different, Docker will start a completely separate s
 
 ## Licensing
 
-This project, including all source code, agentic specifications, and documentation, is licensed under the Apache License 2.0. See the LICENSE file for details.
+This deployment bundle is licensed under the Apache License 2.0. See the LICENSE file for details.
+
+**Important — Retriva Core vs Retriva Pro:**
+
+- **Retriva Core** components (`retriva-core`, `retriva-gateway`, `retriva-webui`) are licensed under the Apache License 2.0. The default `up` command starts only these components plus third-party infrastructure (Qdrant, Tika, Redis, Whisper), so a default deployment contains only Apache-2.0-licensed code.
+- **Retriva Pro** is the commercial bundle formed by Retriva Core plus proprietary extension containers. Each extension is licensed separately and is **not** covered by the Apache 2.0 license of the core. Pro extensions are isolated behind the `pro` Docker Compose profile and are only started when you explicitly run `up-pro` (or the `up-with-connectors` alias).
+- The first Pro extension is `retriva-mediawiki-connector`, licensed under the Retriva Pro Proprietary Commercial License Agreement (see `LICENSE.retriva-pro` in that repository).
+
+This separation ensures that the Apache-2.0-licensed core remains self-contained and that proprietary code is never pulled into a deployment unless explicitly requested.

@@ -1,0 +1,31 @@
+Retriva Local Containerized Deployment
+NOTICE
+
+This deployment bundle orchestrates the following components:
+
+1. Retriva Core components (Apache License 2.0):
+   - retriva-core
+   - retriva-gateway
+   - retriva-webui
+
+2. Third-party infrastructure (各自的许可证):
+   - Qdrant (Apache License 2.0)
+   - Apache Tika (Apache License 2.0)
+   - Redis (BSD 3-Clause)
+   - whisper.cpp (MIT License)
+
+3. Retriva Pro extensions (proprietary, NOT covered by the Apache 2.0 license
+   of the core):
+   - retriva-mediawiki-connector (Retriva Pro Proprietary Commercial License
+     Agreement — see LICENSE.retriva-pro in that repository)
+
+Retriva Pro is the commercial bundle formed by Retriva Core plus proprietary
+extension containers. Pro extensions are isolated behind the "pro" Docker
+Compose profile and are only started when explicitly requested via
+`./scripts/manage.sh up-pro` (or the `up-with-connectors` alias).
+
+A default `./scripts/manage.sh up` deployment contains only Apache-2.0-licensed
+code and does not pull, build, or run any Pro extension containers.
+
+Each Pro extension repository contains its own license file describing the
+terms under which it is distributed. Refer to those files for details.

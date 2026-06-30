@@ -73,8 +73,8 @@ case "$COMMAND" in
     require_env
     docker --version
     docker compose version
-    echo "Checking repository paths from .env..."
-    source .env || true
+    echo "Checking repository paths from $ENV_FILE..."
+    source "$ENV_FILE" || true
     for var in RETRIVA_CORE_DIR RETRIVA_GATEWAY_DIR RETRIVA_WEBUI_DIR RETRIVA_MEDIAWIKI_CONNECTOR_DIR; do
       val="${!var:-}"
       if [[ -n "$val" && -d "$val" ]]; then
@@ -88,7 +88,7 @@ case "$COMMAND" in
   build)
     require_env
     if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
-      SERVICES=$(compose config --services)
+      SERVICES=$(compose --profile pro config --services)
       for ex in "${EXCLUDED_SERVICES[@]}"; do
         SERVICES=$(echo "$SERVICES" | grep -v "^${ex}$" || true)
       done
@@ -97,9 +97,9 @@ case "$COMMAND" in
         exit 0
       fi
       SERVICES=$(echo "$SERVICES" | tr '\n' ' ')
-      compose build $SERVICES
+      compose --profile pro build $SERVICES
     else
-      compose build
+      compose --profile pro build
     fi
     ;;
 
@@ -128,9 +128,23 @@ case "$COMMAND" in
     fi
     ;;
 
+  up-pro)
+    require_env
+    if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
+      SERVICES=$(compose --profile pro config --services)
+      for ex in "${EXCLUDED_SERVICES[@]}"; do
+        SERVICES=$(echo "$SERVICES" | grep -v "^${ex}$" || true)
+      done
+      SERVICES=$(echo "$SERVICES" | tr '\n' ' ')
+      compose --profile pro up -d $SERVICES
+    else
+      compose --profile pro up -d
+    fi
+    ;;
+
   down)
     require_env
-    compose down
+    compose --profile pro down
     ;;
 
   restart)
@@ -159,8 +173,7 @@ case "$COMMAND" in
 
   logs)
     require_env
-    shift || true
-    compose logs -f --tail=200 "$@"
+    compose --profile pro logs -f --tail=200 "$@"
     ;;
 
   health)
@@ -174,29 +187,44 @@ case "$COMMAND" in
 
   connector-shell)
     require_env
-    compose --profile connectors run --rm retriva-mediawiki-connector bash
+    compose --profile pro run --rm retriva-mediawiki-connector bash
     ;;
 
   connector-validate)
     require_env
-    compose --profile connectors run --rm retriva-mediawiki-connector retriva-mediawiki-connector validate --config /app/config/mediawiki.yaml
+    compose --profile pro run --rm retriva-mediawiki-connector validate --config /app/config/mediawiki.yaml
     ;;
 
   connector-sync)
     require_env
-    compose --profile connectors run --rm retriva-mediawiki-connector retriva-mediawiki-connector sync --config /app/config/mediawiki.yaml
+    compose --profile pro run --rm retriva-mediawiki-connector sync --config /app/config/mediawiki.yaml
+    ;;
+
+  pro-shell)
+    require_env
+    compose --profile pro run --rm retriva-mediawiki-connector bash
+    ;;
+
+  pro-validate)
+    require_env
+    compose --profile pro run --rm retriva-mediawiki-connector validate --config /app/config/mediawiki.yaml
+    ;;
+
+  pro-sync)
+    require_env
+    compose --profile pro run --rm retriva-mediawiki-connector sync --config /app/config/mediawiki.yaml
     ;;
 
   delete-containers|clean)
     require_env
-    compose down --remove-orphans
+    compose --profile pro down --remove-orphans
     ;;
 
   delete-volumes|purge)
     require_env
     echo "This will remove containers and named volumes for $PROJECT_NAME. Press Ctrl+C to abort, Enter to continue."
     read -r _
-    compose down --remove-orphans --volumes
+    compose --profile pro down --remove-orphans --volumes
     ;;
 
   help|*)
@@ -211,16 +239,20 @@ Commands:
   check               Check Docker/Compose and repository paths
   build               Build local Retriva images
   up                  Start qdrant, tika, core, gateway, webui
-  up-with-connectors  Start all services including connector profile
+  up-with-connectors  Start all services including connector profile (alias for up-pro)
+  up-pro              Start all services including Retriva Pro extensions
   down                Stop services
   restart [service]   Restart all or one service
   rebuild <svc> ...   Rebuild and recreate specific services (no deps)
   ps                  Show status
   logs [service]      Follow logs
   health              Basic health checks
-  connector-shell     Open shell in MediaWiki connector container
-  connector-validate  Run connector validate command
-  connector-sync      Run connector sync command
+  connector-shell     Open shell in MediaWiki connector container (alias: pro-shell)
+  connector-validate  Run connector validate command (alias: pro-validate)
+  connector-sync      Run connector sync command (alias: pro-sync)
+  pro-shell           Open shell in MediaWiki connector container
+  pro-validate        Run connector validate command
+  pro-sync            Run connector sync command
   delete-containers   Stop and remove containers (alias for clean)
   delete-volumes      Stop and remove containers and volumes (alias for purge)
   clean               Stop and remove containers, keep volumes

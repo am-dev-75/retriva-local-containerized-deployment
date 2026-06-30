@@ -1,8 +1,10 @@
 tenant_id: local-dev
 source_id: src_local_mediawiki
 wiki_id: localwiki
-api_url: ${MEDIAWIKI_API_URL}
-auth_mode: ${MEDIAWIKI_AUTH_MODE}
+# These can be overridden by MEDIAWIKI_CONNECTOR_API_URL and
+# MEDIAWIKI_CONNECTOR_AUTH_MODE env vars (pydantic-settings prefix).
+api_url: https://your.mediawiki.example/api.php
+auth_mode: none
 allowed_namespaces: [0]
 include_categories: []
 exclude_categories: []
@@ -10,7 +12,7 @@ page_title_prefix: null
 target_kb_id: default
 sync_interval_minutes: 15
 delete_policy: soft_delete
-availability_policy: allow_partial_during_initial_sync
+availability_policy: show_immediately
 gateway_base_url: http://retriva-gateway:8002
 state_store_path: /app/state/mediawiki-connector-cache.sqlite
 request_timeout_seconds: 30
