@@ -137,7 +137,103 @@ For example, to override `sync_interval_minutes` and `target_kb_id` globally, yo
 MEDIAWIKI_CONNECTOR_SYNC_INTERVAL_MINUTES=30
 MEDIAWIKI_CONNECTOR_TARGET_KB_ID=my_custom_kb
 ```
-Note: Secrets (like `MEDIAWIKI_BOT_PASSWORD`) don't require this prefix and use thAdd support for multiple Mediawiki website instances.eir standard names.
+Note: Secrets (like `MEDIAWIKI_BOT_PASSWORD`) don't require this prefix and use their standard names.
+
+### Multiple MediaWiki Instances
+
+Retriva Pro supports syncing multiple MediaWiki websites simultaneously. Each wiki gets its own connector container with its own configuration, state, and tag. Chunks from different wikis are distinguished by the `tag` field in their metadata, allowing you to filter search results by source wiki.
+
+#### Setup
+
+To add a second MediaWiki instance:
+
+**1. Create a config file**
+
+Copy the default config and adjust the wiki-specific settings:
+
+```bash
+cp config/mediawiki.yaml config/mediawiki-2.yaml
+```
+
+Edit `config/mediawiki-2.yaml` — at minimum change `wiki_id` and `source_id`:
+
+```yaml
+wiki_id: secondwiki
+source_id: src_mediawiki_2
+api_url: https://second.wiki.example/api.php
+# ... other settings
+```
+
+**2. Add environment variables to `.env`**
+
+Add a `MEDIAWIKI_CONNECTOR_2_*` block for the second wiki:
+
+```env
+# --- MediaWiki Connector #2 ---
+MEDIAWIKI_CONNECTOR_2_API_URL=https://second.wiki.example/api.php
+MEDIAWIKI_CONNECTOR_2_PUBLIC_URL=https://second.wiki.example/api.php
+MEDIAWIKI_CONNECTOR_2_TAG=wiki-2
+MEDIAWIKI_CONNECTOR_2_AUTH_MODE=none
+MEDIAWIKI_CONNECTOR_2_USERNAME=
+MEDIAWIKI_CONNECTOR_2_BOT_PASSWORD=
+MEDIAWIKI_CONNECTOR_2_SOURCE_ID=src_mediawiki_2
+MEDIAWIKI_CONNECTOR_2_TARGET_KB_ID=default
+MEDIAWIKI_CONNECTOR_2_COMMAND=daemon
+```
+
+**3. Uncomment the second connector in `docker-compose.yml`**
+
+Find the commented `retriva-mediawiki-connector-2` service block and uncomment it. The block is pre-configured to read from `MEDIAWIKI_CONNECTOR_2_*` env vars and mount `config/mediawiki-2.yaml`.
+
+**4. Rebuild and start**
+
+```bash
+./scripts/manage.sh build
+./scripts/manage.sh up-pro
+```
+
+#### How Tags Work
+
+Each connector tags every ingested chunk with a `tag` value in its `user_metadata`:
+
+| Connector | Env var | Tag value | Example |
+|---|---|---|---|
+| Wiki 1 | `MEDIAWIKI_CONNECTOR_TAG` | `wiki-1` | `user_metadata.tag = "wiki-1"` |
+| Wiki 2 | `MEDIAWIKI_CONNECTOR_2_TAG` | `wiki-2` | `user_metadata.tag = "wiki-2"` |
+
+If `tag` is not set, it falls back to `wiki_id`. You can use this tag to filter search results or chat queries to a specific wiki using metadata filters:
+
+```json
+{
+  "metadata_filters": [
+    {"field": "user_metadata.tag", "operator": "eq", "value": "wiki-2"}
+  ]
+}
+```
+
+#### Managing Individual Connectors
+
+Each connector runs in its own container with a unique name. You can manage them independently:
+
+```bash
+# View logs for a specific connector
+./scripts/manage.sh logs retriva-mediawiki-connector
+./scripts/manage.sh logs retriva-mediawiki-connector-2
+
+# Restart a specific connector
+./scripts/manage.sh restart retriva-mediawiki-connector-2
+
+# Exclude a specific connector from startup
+./scripts/manage.sh --exclude retriva-mediawiki-connector-2 up-pro
+```
+
+#### Adding More Wikis
+
+Follow the same pattern for additional wikis:
+1. Create `config/mediawiki-3.yaml`
+2. Add `MEDIAWIKI_CONNECTOR_3_*` env vars
+3. Copy and customize a `retriva-mediawiki-connector-3` service block in `docker-compose.yml`
+4. Add a `mediawiki_connector_3_state` volume
 ## Managing Multiple Deployments (Tagging)
 
 If you need to manage multiple deployments side-by-side (e.g., one for Customer A and one for Customer B), you can use the `COMPOSE_PROJECT_NAME` variable.
