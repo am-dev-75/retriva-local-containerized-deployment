@@ -10,6 +10,7 @@ volumes:
   retriva_core_storage:
   retriva_gateway_storage:
   mediawiki_connector_state:
+  mediawiki_connector_2_state:
   whisper_models:
   redis_data:
 
@@ -297,6 +298,12 @@ services:
       retries: 20
       start_period: 30s
 
+  # --- Retriva Pro: MediaWiki Connectors ---
+  # Each MediaWiki instance gets its own connector service with its own
+  # config file, state volume, and env vars.  To add a new wiki:
+  # 1. Create a config/mediawiki-<name>.yaml (copy from mediawiki.yaml)
+  # 2. Add MEDIAWIKI_CONNECTOR_<N>_* vars to .env
+  # 3. Uncomment and customize the retriva-mediawiki-connector-2 block below
   retriva-mediawiki-connector:
     build:
       context: ${RETRIVA_MEDIAWIKI_CONNECTOR_DIR:-../retriva-mediawiki-connector}
@@ -304,9 +311,6 @@ services:
     image: ${RETRIVA_MEDIAWIKI_CONNECTOR_IMAGE:-retriva-mediawiki-connector:local}
     container_name: retriva-mediawiki-connector
     restart: "no"
-    # The "pro" profile groups all Retriva Pro commercial extensions.
-    # Retriva Pro = Retriva Core (Apache 2.0) + proprietary extension containers.
-    # Each new extension should be tagged with profiles: ["pro"].
     profiles: ["pro", "connectors"]
     env_file:
       - ${ENV_FILE:-.env}
@@ -315,12 +319,12 @@ services:
       GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://retriva-gateway:8002}
       RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL:-http://retriva-gateway:8002}
       GATEWAY_INTERNAL_SERVICE_TOKEN: ${GATEWAY_INTERNAL_SERVICE_TOKEN:-local-dev-service-token}
-      # Connector config (pydantic-settings reads MEDIAWIKI_CONNECTOR_* prefix)
       MEDIAWIKI_CONNECTOR_API_URL: ${MEDIAWIKI_CONNECTOR_API_URL:-}
       MEDIAWIKI_CONNECTOR_AUTH_MODE: ${MEDIAWIKI_CONNECTOR_AUTH_MODE:-none}
       MEDIAWIKI_CONNECTOR_SOURCE_ID: ${MEDIAWIKI_CONNECTOR_SOURCE_ID:-src_local_mediawiki}
       MEDIAWIKI_CONNECTOR_TARGET_KB_ID: ${MEDIAWIKI_CONNECTOR_TARGET_KB_ID:-default}
-      # Credentials (mediawiki_client.py reads these WITHOUT the prefix)
+      MEDIAWIKI_CONNECTOR_TAG: ${MEDIAWIKI_CONNECTOR_TAG:-}
+      MEDIAWIKI_CONNECTOR_PUBLIC_URL: ${MEDIAWIKI_CONNECTOR_PUBLIC_URL:-}
       MEDIAWIKI_USERNAME: ${MEDIAWIKI_CONNECTOR_USERNAME:-}
       MEDIAWIKI_BOT_PASSWORD: ${MEDIAWIKI_CONNECTOR_BOT_PASSWORD:-}
       MEDIAWIKI_CONFIG: /app/config/mediawiki.yaml
@@ -333,14 +337,48 @@ services:
         condition: service_healthy
     networks:
       - retriva-net
-    # Allow the connector to reach a MediaWiki instance running on the host
-    # (e.g. a local docker-compose MediaWiki on localhost:8200) via
-    # http://host.docker.internal:<port>.  On Linux this requires the
-    # extra_hosts mapping below; Docker Desktop (Mac/Windows) provides it
-    # automatically.
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: ${MEDIAWIKI_CONNECTOR_COMMAND:-sleep infinity}
+    command: ${MEDIAWIKI_CONNECTOR_COMMAND:-daemon}
+
+  # Template for a second MediaWiki connector.
+  # Uncomment and customize to sync a second wiki.
+  # retriva-mediawiki-connector-2:
+  #   build:
+  #     context: ${RETRIVA_MEDIAWIKI_CONNECTOR_DIR:-../retriva-mediawiki-connector}
+  #     dockerfile: ${RETRIVA_MEDIAWIKI_CONNECTOR_DOCKERFILE:-Dockerfile}
+  #   image: ${RETRIVA_MEDIAWIKI_CONNECTOR_IMAGE:-retriva-mediawiki-connector:local}
+  #   container_name: retriva-mediawiki-connector-2
+  #   restart: "no"
+  #   profiles: ["pro", "connectors"]
+  #   env_file:
+  #     - ${ENV_FILE:-.env}
+  #   environment:
+  #     TZ: ${TZ:-UTC}
+  #     GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://retriva-gateway:8002}
+  #     RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL:-http://retriva-gateway:8002}
+  #     GATEWAY_INTERNAL_SERVICE_TOKEN: ${GATEWAY_INTERNAL_SERVICE_TOKEN:-local-dev-service-token}
+  #     MEDIAWIKI_CONNECTOR_API_URL: ${MEDIAWIKI_CONNECTOR_2_API_URL:-}
+  #     MEDIAWIKI_CONNECTOR_AUTH_MODE: ${MEDIAWIKI_CONNECTOR_2_AUTH_MODE:-none}
+  #     MEDIAWIKI_CONNECTOR_SOURCE_ID: ${MEDIAWIKI_CONNECTOR_2_SOURCE_ID:-src_mediawiki_2}
+  #     MEDIAWIKI_CONNECTOR_TARGET_KB_ID: ${MEDIAWIKI_CONNECTOR_2_TARGET_KB_ID:-default}
+  #     MEDIAWIKI_CONNECTOR_TAG: ${MEDIAWIKI_CONNECTOR_2_TAG:-}
+  #     MEDIAWIKI_CONNECTOR_PUBLIC_URL: ${MEDIAWIKI_CONNECTOR_2_PUBLIC_URL:-}
+  #     MEDIAWIKI_USERNAME: ${MEDIAWIKI_CONNECTOR_2_USERNAME:-}
+  #     MEDIAWIKI_BOT_PASSWORD: ${MEDIAWIKI_CONNECTOR_2_BOT_PASSWORD:-}
+  #     MEDIAWIKI_CONFIG: /app/config/mediawiki-2.yaml
+  #     LOCAL_STATE_STORE_PATH: /app/state/mediawiki-connector-cache.sqlite
+  #   volumes:
+  #     - ./config/mediawiki-2.yaml:/app/config/mediawiki-2.yaml:ro
+  #     - mediawiki_connector_2_state:/app/state
+  #   depends_on:
+  #     retriva-gateway:
+  #       condition: service_healthy
+  #   networks:
+  #     - retriva-net
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
+  #   command: ${MEDIAWIKI_CONNECTOR_2_COMMAND:-daemon}
 
   retriva-webui:
     build:
