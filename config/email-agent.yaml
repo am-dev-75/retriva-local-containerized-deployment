@@ -1,0 +1,39 @@
+tenant_id: local-dev
+source_id: src_local_email_agent
+connector_id: email_agent
+
+# --- Ingestion target ---
+target_kb_id: default
+default_collection_name: ""
+
+# --- Built-in SMTP server (receive only) ---
+# Override with EMAIL_AGENT_CONNECTOR_* env vars.
+smtp_host: "0.0.0.0"
+smtp_port: 8025
+smtp_require_tls: false
+allowed_senders: []
+
+# --- Job confirmation ---
+# Wait for the ingestion job to complete before discarding the email.
+wait_for_job: true
+job_poll_interval_seconds: 2
+job_timeout_seconds: 120
+
+# --- Address decoding ---
+address_prefix: retriva
+address_domain: ""
+
+# --- Gateway ---
+gateway_base_url: http://retriva-gateway:8002
+
+# --- State ---
+state_store_path: /app/state/email-agent-connector-cache.sqlite
+
+# --- Retry ---
+request_timeout_seconds: 30
+retry_max_attempts: 3
+retry_backoff_seconds: 2
+
+# --- Misc ---
+delete_policy: soft_delete
+availability_policy: show_immediately

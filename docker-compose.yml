@@ -11,6 +11,7 @@ volumes:
   retriva_gateway_storage:
   mediawiki_connector_state:
   mediawiki_connector_2_state:
+  email_agent_connector_state:
   whisper_models:
   redis_data:
 
@@ -379,6 +380,54 @@ services:
   #   extra_hosts:
   #     - "host.docker.internal:host-gateway"
   #   command: ${MEDIAWIKI_CONNECTOR_2_COMMAND:-daemon}
+
+  # --- Retriva Pro: Email Agent Connector ---
+  # Runs a built-in SMTP server that receives emails sent to a Retriva-managed
+  # address and ingests them via the Gateway.  Supports plus-addressed metadata:
+  #   retriva+collection_name+kb+tag1+tag2@retriva-server.com
+  # Messages are discarded after processing (no mailbox storage).
+  # See ../retriva-email-agent-connector/README.md for details.
+  retriva-email-agent-connector:
+    build:
+      context: ${RETRIVA_EMAIL_AGENT_CONNECTOR_DIR:-../retriva-email-agent-connector}
+      dockerfile: ${RETRIVA_EMAIL_AGENT_CONNECTOR_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_EMAIL_AGENT_CONNECTOR_IMAGE:-retriva-email-agent-connector:local}
+    container_name: retriva-email-agent-connector
+    restart: unless-stopped
+    profiles: ["pro", "connectors"]
+    env_file:
+      - ${ENV_FILE:-.env}
+    environment:
+      TZ: ${TZ:-UTC}
+      GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://retriva-gateway:8002}
+      RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL:-http://retriva-gateway:8002}
+      GATEWAY_INTERNAL_SERVICE_TOKEN: ${GATEWAY_INTERNAL_SERVICE_TOKEN:-local-dev-service-token}
+      EMAIL_AGENT_CONNECTOR_TENANT_ID: ${EMAIL_AGENT_CONNECTOR_TENANT_ID:-local-dev}
+      EMAIL_AGENT_CONNECTOR_SOURCE_ID: ${EMAIL_AGENT_CONNECTOR_SOURCE_ID:-src_local_email_agent}
+      EMAIL_AGENT_CONNECTOR_TARGET_KB_ID: ${EMAIL_AGENT_CONNECTOR_TARGET_KB_ID:-default}
+      EMAIL_AGENT_CONNECTOR_SMTP_HOST: ${EMAIL_AGENT_CONNECTOR_SMTP_HOST:-0.0.0.0}
+      EMAIL_AGENT_CONNECTOR_SMTP_PORT: ${EMAIL_AGENT_CONNECTOR_SMTP_PORT:-8025}
+      EMAIL_AGENT_CONNECTOR_SMTP_REQUIRE_TLS: ${EMAIL_AGENT_CONNECTOR_SMTP_REQUIRE_TLS:-false}
+      EMAIL_AGENT_CONNECTOR_WAIT_FOR_JOB: ${EMAIL_AGENT_CONNECTOR_WAIT_FOR_JOB:-true}
+      EMAIL_AGENT_CONNECTOR_JOB_POLL_INTERVAL_SECONDS: ${EMAIL_AGENT_CONNECTOR_JOB_POLL_INTERVAL_SECONDS:-2}
+      EMAIL_AGENT_CONNECTOR_JOB_TIMEOUT_SECONDS: ${EMAIL_AGENT_CONNECTOR_JOB_TIMEOUT_SECONDS:-120}
+      EMAIL_AGENT_CONNECTOR_ADDRESS_PREFIX: ${EMAIL_AGENT_CONNECTOR_ADDRESS_PREFIX:-retriva}
+      EMAIL_AGENT_CONNECTOR_ADDRESS_DOMAIN: ${EMAIL_AGENT_CONNECTOR_ADDRESS_DOMAIN:-}
+      EMAIL_AGENT_CONFIG: /app/config/email-agent.yaml
+      EMAIL_AGENT_CONNECTOR_STATE_STORE_PATH: /app/state/email-agent-connector-cache.sqlite
+    ports:
+      - "${EMAIL_AGENT_SMTP_HOST_PORT:-127.0.0.1:8025}:${EMAIL_AGENT_CONNECTOR_SMTP_PORT:-8025}"
+    volumes:
+      - ./config/email-agent.yaml:/app/config/email-agent.yaml:ro
+      - email_agent_connector_state:/app/state
+    depends_on:
+      retriva-gateway:
+        condition: service_healthy
+    networks:
+      - retriva-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ${EMAIL_AGENT_CONNECTOR_COMMAND:-run}
 
   retriva-webui:
     build:

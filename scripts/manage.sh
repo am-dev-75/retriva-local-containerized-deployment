@@ -66,7 +66,7 @@ case "$COMMAND" in
     else
       echo ".env already exists; leaving it unchanged."
     fi
-    mkdir -p data/qdrant data/core data/gateway data/connectors/mediawiki logs config
+    mkdir -p data/qdrant data/core data/gateway data/connectors/mediawiki data/connectors/email logs config
     ;;
 
   check)
@@ -75,7 +75,7 @@ case "$COMMAND" in
     docker compose version
     echo "Checking repository paths from $ENV_FILE..."
     source "$ENV_FILE" || true
-    for var in RETRIVA_CORE_DIR RETRIVA_GATEWAY_DIR RETRIVA_WEBUI_DIR RETRIVA_MEDIAWIKI_CONNECTOR_DIR; do
+    for var in RETRIVA_CORE_DIR RETRIVA_GATEWAY_DIR RETRIVA_WEBUI_DIR RETRIVA_MEDIAWIKI_CONNECTOR_DIR RETRIVA_EMAIL_AGENT_CONNECTOR_DIR; do
       val="${!var:-}"
       if [[ -n "$val" && -d "$val" ]]; then
         echo "OK: $var=$val"
@@ -200,6 +200,21 @@ case "$COMMAND" in
     compose --profile pro run --rm retriva-mediawiki-connector sync --config /app/config/mediawiki.yaml
     ;;
 
+  email-shell)
+    require_env
+    compose --profile pro run --rm retriva-email-agent-connector bash
+    ;;
+
+  email-validate)
+    require_env
+    compose --profile pro run --rm retriva-email-agent-connector validate --config /app/config/email-agent.yaml
+    ;;
+
+  email-run)
+    require_env
+    compose --profile pro up -d --no-deps retriva-email-agent-connector
+    ;;
+
   pro-shell)
     require_env
     compose --profile pro run --rm retriva-mediawiki-connector bash
@@ -250,6 +265,9 @@ Commands:
   connector-shell     Open shell in MediaWiki connector container (alias: pro-shell)
   connector-validate  Run connector validate command (alias: pro-validate)
   connector-sync      Run connector sync command (alias: pro-sync)
+  email-shell         Open shell in Email Agent connector container
+  email-validate      Run Email Agent connector validate command
+  email-run            Start Email Agent connector (SMTP server)
   pro-shell           Open shell in MediaWiki connector container
   pro-validate        Run connector validate command
   pro-sync            Run connector sync command
