@@ -87,15 +87,26 @@ case "$COMMAND" in
 
   build)
     require_env
+    SERVICES="qdrant redis tika whisper retriva-ingestion retriva-worker retriva-core retriva-gateway retriva-webui"
     if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
-      SERVICES=$(compose --profile pro config --services)
       for ex in "${EXCLUDED_SERVICES[@]}"; do
-        SERVICES=$(echo "$SERVICES" | grep -v "^${ex}$" || true)
+        SERVICES=$(echo "$SERVICES" | tr ' ' '\n' | grep -v "^${ex}$" | tr '\n' ' ' || true)
       done
       if [[ -z "$SERVICES" ]]; then
         echo "No services to build after exclusions."
         exit 0
       fi
+    fi
+    compose build $SERVICES
+    ;;
+
+  build-pro)
+    require_env
+    if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
+      SERVICES=$(compose --profile pro config --services)
+      for ex in "${EXCLUDED_SERVICES[@]}"; do
+        SERVICES=$(echo "$SERVICES" | grep -v "^${ex}$" || true)
+      done
       SERVICES=$(echo "$SERVICES" | tr '\n' ' ')
       compose --profile pro build $SERVICES
     else
@@ -173,7 +184,16 @@ case "$COMMAND" in
 
   logs)
     require_env
-    compose --profile pro logs -f --tail=200 "$@"
+    FOLLOW=true
+    if [[ "${1:-}" == "--no-follow" ]]; then
+      FOLLOW=false
+      shift
+    fi
+    if [[ "$FOLLOW" == "true" ]]; then
+      compose --profile pro logs -f --tail=200 "$@"
+    else
+      compose --profile pro logs --tail=200 "$@"
+    fi
     ;;
 
   health)
@@ -253,6 +273,7 @@ Commands:
   init                Create .env and local folders
   check               Check Docker/Compose and repository paths
   build               Build local Retriva images
+  build-pro           Build core images plus all Retriva Pro profile services
   up                  Start qdrant, tika, core, gateway, webui
   up-with-connectors  Start all services including connector profile (alias for up-pro)
   up-pro              Start all services including Retriva Pro extensions
@@ -260,7 +281,8 @@ Commands:
   restart [service]   Restart all or one service
   rebuild <svc> ...   Rebuild and recreate specific services (no deps)
   ps                  Show status
-  logs [service]      Follow logs
+  logs [--no-follow] [service]
+                      Show logs (follow by default)
   health              Basic health checks
   connector-shell     Open shell in MediaWiki connector container (alias: pro-shell)
   connector-validate  Run connector validate command (alias: pro-validate)

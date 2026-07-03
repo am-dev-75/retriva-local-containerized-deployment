@@ -89,6 +89,52 @@ If the connector CLI is not yet implemented, use:
 ./scripts/manage.sh pro-shell
 ```
 
+## Authentication
+
+Authentication is disabled by default for local development:
+
+```env
+RETRIVA_AUTH_PROVIDER=none
+VITE_RETRIVA_AUTH_PROVIDER=none
+```
+
+In this mode the Gateway uses its anonymous `NullAuthProvider`, the WebUI renders without login, and API requests do not include an `Authorization` header.
+
+### Enabling Microsoft Entra ID
+
+Microsoft Entra ID support is provided by the proprietary `retriva-iam-entra` package. The Apache-2.0 Gateway image contains only the generic auth abstraction; it does not include Entra validation code.
+
+To build a local Pro Gateway image with the Entra provider installed, copy the relevant values from `.env.entra.example` into your `.env`:
+
+```env
+RETRIVA_GATEWAY_CONTEXT=..
+RETRIVA_GATEWAY_DOCKERFILE=retriva-local-containerized-deployment/Dockerfile.gateway-pro
+RETRIVA_AUTH_PROVIDER=entra
+VITE_RETRIVA_AUTH_PROVIDER=entra
+```
+
+Then configure the Entra app registration variables documented in `.env.entra.example` and `../retriva-iam-entra/README.md`.
+
+Important notes:
+
+- `VITE_RETRIVA_*` values are embedded into the WebUI at build time. Rebuild `retriva-webui` after changing them.
+- Do not commit `.env` files containing tenant-specific values or secrets.
+- Do not log access tokens. Gateway logs should contain principal identifiers only.
+- If `RETRIVA_AUTH_PROVIDER=entra` but the Pro provider package is not installed, the Gateway intentionally fails closed at startup.
+- `RETRIVA_AUTH_EXEMPT_PATHS` accepts either a comma-separated list (`/health,/ready,/capabilities`) or a JSON array.
+
+Troubleshooting:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Gateway fails with “no matching package is installed” | Pro provider not installed in Gateway image | Use `Dockerfile.gateway-pro` build path above. |
+| `Invalid token audience` | Entra API scope / Application ID URI mismatch | Set `RETRIVA_ENTRA_AUDIENCE` to the access token `aud`. |
+| `Invalid token issuer` | Wrong tenant or issuer override | Check `RETRIVA_ENTRA_TENANT_ID` / `RETRIVA_ENTRA_ISSUER`. |
+| `Token has expired` | Expired access token | Sign in again. |
+| WebUI redirect mismatch | SPA redirect URI not registered | Add `http://localhost:5173` and production origins in Entra. |
+| CORS errors | Gateway CORS origin missing | Add WebUI origin to `GATEWAY_CORS_ORIGINS`. |
+| Changed VITE vars but UI unchanged | WebUI image still has old build-time values | Rebuild `retriva-webui`. |
+
 ## Excluding Services
 
 You can optionally exclude specific services from being built or started by passing the `--exclude <service_name>` flag to the `manage.sh` script. This is especially useful if you haven't cloned an optional service (like `retriva-mediawiki-connector`) and want to avoid build or startup errors.
