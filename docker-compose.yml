@@ -137,6 +137,7 @@ services:
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
+      CHAT_REASONING_EFFORT: ${CHAT_REASONING_EFFORT:-}
 
       # Local-dev behavior
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
@@ -196,6 +197,7 @@ services:
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
+      CHAT_REASONING_EFFORT: ${CHAT_REASONING_EFFORT:-}
 
       # Local-dev behavior
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
@@ -241,6 +243,7 @@ services:
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
+      CHAT_REASONING_EFFORT: ${CHAT_REASONING_EFFORT:-}
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
       LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
