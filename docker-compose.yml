@@ -198,6 +198,10 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
       CHAT_REASONING_EFFORT: ${CHAT_REASONING_EFFORT:-}
+      # Optional system-prompt override (Retriva Pro / per-customer). When
+      # non-empty, replaces the default grounded-QA prompt in retriva-core.
+      # See .env.example for placeholder syntax.
+      SYSTEM_PROMPT_OVERRIDE: ${SYSTEM_PROMPT_OVERRIDE:-}
 
       # Local-dev behavior
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
