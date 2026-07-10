@@ -104,7 +104,7 @@ In this mode the Gateway uses its anonymous `NullAuthProvider`, the WebUI render
 
 Microsoft Entra ID support is provided by the proprietary `retriva-iam-entra` package. The Apache-2.0 Gateway image contains only the generic auth abstraction; it does not include Entra validation code.
 
-To build a local Pro Gateway image with the Entra provider installed, copy the relevant values from `.env.entra.example` into your `.env`:
+To build a local Pro Gateway image with the Entra provider installed, set the following in your `.env` (see the Authentication section of `.env.example` for the full list of Entra variables):
 
 ```env
 RETRIVA_GATEWAY_CONTEXT=..
@@ -113,7 +113,7 @@ RETRIVA_AUTH_PROVIDER=entra
 VITE_RETRIVA_AUTH_PROVIDER=entra
 ```
 
-Then configure the Entra app registration variables documented in `.env.entra.example` and `../retriva-iam-entra/README.md`.
+Then configure the Entra app registration variables documented in `.env.example` and `../retriva-iam-entra/README.md`.
 
 Important notes:
 
