@@ -58,6 +58,40 @@ require_env() {
   fi
 }
 
+# Auto-exclude connectors that are disabled in the .env file.
+# Each connector has an ENABLED flag (on/off, default: off).
+# When disabled, the connector service is added to EXCLUDED_SERVICES
+# so it is not started by up-pro/up-with-connectors/build.
+_auto_exclude_disabled_connectors() {
+  if [[ ! -f "$ENV_FILE" ]]; then
+    return
+  fi
+
+  # MediaWiki Connector #1
+  local mw_enabled
+  mw_enabled=$(grep -E '^MEDIAWIKI_CONNECTOR_ENABLED=' "$ENV_FILE" 2>/dev/null | cut -d '=' -f 2- | tr -d '[:space:]' || true)
+  if [[ "$mw_enabled" != "on" ]]; then
+    EXCLUDED_SERVICES+=("retriva-mediawiki-connector")
+  fi
+
+  # MediaWiki Connector #2 (only if the service is uncommented in docker-compose)
+  local mw2_enabled
+  mw2_enabled=$(grep -E '^MEDIAWIKI_CONNECTOR_2_ENABLED=' "$ENV_FILE" 2>/dev/null | cut -d '=' -f 2- | tr -d '[:space:]' || true)
+  if [[ "$mw2_enabled" != "on" ]]; then
+    EXCLUDED_SERVICES+=("retriva-mediawiki-connector-2")
+  fi
+
+  # Email Agent Connector
+  local email_enabled
+  email_enabled=$(grep -E '^EMAIL_AGENT_CONNECTOR_ENABLED=' "$ENV_FILE" 2>/dev/null | cut -d '=' -f 2- | tr -d '[:space:]' || true)
+  if [[ "$email_enabled" != "on" ]]; then
+    EXCLUDED_SERVICES+=("retriva-email-agent-connector")
+  fi
+}
+
+# Call auto-exclusion before processing commands that start/build services.
+_auto_exclude_disabled_connectors
+
 case "$COMMAND" in
   init)
     if [[ ! -f .env ]]; then
@@ -268,6 +302,14 @@ Usage: ./scripts/manage.sh [--exclude <service>] <command>
 
 Options:
   --exclude <service> Exclude a specific service (can be used multiple times)
+
+Connector auto-exclusion:
+  Connectors with ENABLED=off (the default) in the .env file are
+  automatically excluded from up-pro, up-with-connectors, and build.
+  Set ENABLED=on to enable a connector on startup:
+    MEDIAWIKI_CONNECTOR_ENABLED=on
+    MEDIAWIKI_CONNECTOR_2_ENABLED=on
+    EMAIL_AGENT_CONNECTOR_ENABLED=on
 
 Commands:
   init                Create .env and local folders
