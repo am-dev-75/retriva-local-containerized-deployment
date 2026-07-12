@@ -120,7 +120,7 @@ services:
       TZ: ${TZ:-UTC}
       # Service wiring
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-retriva_chunks}
+      RETRIVA_DEFAULT_COLLECTION: ${RETRIVA_DEFAULT_COLLECTION:-retriva_chunks}
       TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
 
       # --- OpenAI-compatible provider (default: OpenRouter) ----------------
@@ -180,7 +180,7 @@ services:
       TZ: ${TZ:-UTC}
       # Service wiring
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-retriva_chunks}
+      RETRIVA_DEFAULT_COLLECTION: ${RETRIVA_DEFAULT_COLLECTION:-retriva_chunks}
       TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
 
       # --- OpenAI-compatible provider (default: OpenRouter) ----------------
@@ -237,7 +237,7 @@ services:
     environment:
       TZ: ${TZ:-UTC}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-retriva_chunks}
+      RETRIVA_DEFAULT_COLLECTION: ${RETRIVA_DEFAULT_COLLECTION:-retriva_chunks}
       TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
       OPENROUTER_OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}

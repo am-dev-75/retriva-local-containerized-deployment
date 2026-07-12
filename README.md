@@ -1,5 +1,28 @@
 # Retriva Local Containerized Deployment
 
+- [Retriva Local Containerized Deployment](#retriva-local-containerized-deployment)
+  - [Retriva Core vs Retriva Pro](#retriva-core-vs-retriva-pro)
+  - [Expected repository layout](#expected-repository-layout)
+  - [Quick start on Linux](#quick-start-on-linux)
+  - [Retriva Pro extensions (`up-pro` vs `up`)](#retriva-pro-extensions-up-pro-vs-up)
+  - [Authentication](#authentication)
+    - [Enabling Microsoft Entra ID](#enabling-microsoft-entra-id)
+  - [Collections Handling](#collections-handling)
+    - [With Authentication Disabled](#with-authentication-disabled)
+    - [With Microsoft Entra ID](#with-microsoft-entra-id)
+  - [Excluding Services](#excluding-services)
+  - [Common operations](#common-operations)
+  - [Overriding Settings Globally](#overriding-settings-globally)
+    - [MediaWiki Connector Settings](#mediawiki-connector-settings)
+    - [Multiple MediaWiki Instances](#multiple-mediawiki-instances)
+      - [Setup](#setup)
+      - [How Tags Work](#how-tags-work)
+      - [Managing Individual Connectors](#managing-individual-connectors)
+      - [Adding More Wikis](#adding-more-wikis)
+  - [Managing Multiple Deployments (Tagging)](#managing-multiple-deployments-tagging)
+  - [Notes](#notes)
+  - [Licensing](#licensing)
+
 Version: 1.5.0
 
 This folder provides a local Docker Compose deployment for development/testing.
@@ -125,15 +148,38 @@ Important notes:
 
 Troubleshooting:
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| Gateway fails with “no matching package is installed” | Pro provider not installed in Gateway image | Use `Dockerfile.gateway-pro` build path above. |
-| `Invalid token audience` | Entra API scope / Application ID URI mismatch | Set `RETRIVA_ENTRA_AUDIENCE` to the access token `aud`. |
-| `Invalid token issuer` | Wrong tenant or issuer override | Check `RETRIVA_ENTRA_TENANT_ID` / `RETRIVA_ENTRA_ISSUER`. |
-| `Token has expired` | Expired access token | Sign in again. |
-| WebUI redirect mismatch | SPA redirect URI not registered | Add `http://localhost:5173` and production origins in Entra. |
-| CORS errors | Gateway CORS origin missing | Add WebUI origin to `GATEWAY_CORS_ORIGINS`. |
-| Changed VITE vars but UI unchanged | WebUI image still has old build-time values | Rebuild `retriva-webui`. |
+| Symptom                                               | Likely cause                                  | Fix                                                          |
+| ----------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------ |
+| Gateway fails with “no matching package is installed” | Pro provider not installed in Gateway image   | Use `Dockerfile.gateway-pro` build path above.               |
+| `Invalid token audience`                              | Entra API scope / Application ID URI mismatch | Set `RETRIVA_ENTRA_AUDIENCE` to the access token `aud`.      |
+| `Invalid token issuer`                                | Wrong tenant or issuer override               | Check `RETRIVA_ENTRA_TENANT_ID` / `RETRIVA_ENTRA_ISSUER`.    |
+| `Token has expired`                                   | Expired access token                          | Sign in again.                                               |
+| WebUI redirect mismatch                               | SPA redirect URI not registered               | Add `http://localhost:5173` and production origins in Entra. |
+| CORS errors                                           | Gateway CORS origin missing                   | Add WebUI origin to `GATEWAY_CORS_ORIGINS`.                  |
+| Changed VITE vars but UI unchanged                    | WebUI image still has old build-time values   | Rebuild `retriva-webui`.                                     |
+
+## Collections Handling
+
+Retriva supports true multi-tenant collection isolation. The backend partitions vector storage, local artifacts, and knowledge base registries per collection.
+
+### With Authentication Disabled
+
+When running locally without authentication (`RETRIVA_AUTH_PROVIDER=none`), the Gateway operates in an anonymous mode where collection access restrictions are not enforced.
+
+1. **Default Collection**: By default, all requests are routed to the collection specified by the `RETRIVA_DEFAULT_COLLECTION` environment variable (defaults to `retriva_chunks`).
+2. **Dynamic Selection**: A client (e.g., the WebUI or `curl`) can dynamically switch collections by sending the `X-Retriva-Requested-Collection: <collection_name>` HTTP header. The Gateway trusts this header unconditionally and routes the request to the specified collection. You do not need to register collection names ahead of time in `.env`.
+
+### With Microsoft Entra ID
+
+When Entra ID is enabled (`RETRIVA_AUTH_PROVIDER=entra`), collection access is securely enforced based on the custom claims in the user's JWT access token.
+
+1. **Token Claims**: You must configure Entra ID to include the custom claims that define a user's allowed collections.
+2. **Env Configuration**: Map these claims in your `.env` file (if they differ from the defaults):
+   ```env
+   RETRIVA_ENTRA_COLLECTIONS_CLAIM=retriva_collections
+   RETRIVA_ENTRA_DEFAULT_COLLECTION_CLAIM=retriva_default_collection
+   ```
+3. **Authorization**: When the client requests a collection via the `X-Retriva-Requested-Collection` header, the Gateway verifies that the requested collection is listed in the user's token claims. If omitted, the Gateway falls back to the user's `default_collection` claim, or the global `RETRIVA_DEFAULT_COLLECTION`. Unauthorized requests are rejected with a `403 Forbidden` error.
 
 ## Excluding Services
 
@@ -164,7 +210,7 @@ Example, start all Pro services except the MediaWiki connector:
 
 ## Overriding Settings Globally
 
-You can override any application setting (such as `QDRANT_COLLECTION_NAME`, port numbers, or API keys) by editing your `.env` file. 
+You can override any application setting (such as `RETRIVA_DEFAULT_COLLECTION`, port numbers, or API keys) by editing your `.env` file. 
 
 If your containers are already up and running, you do not need to tear them down completely. After modifying `.env`, simply run:
 
@@ -242,10 +288,10 @@ Find the commented `retriva-mediawiki-connector-2` service block and uncomment i
 
 Each connector tags every ingested chunk with a `tag` value in its `user_metadata`:
 
-| Connector | Env var | Tag value | Example |
-|---|---|---|---|
-| Wiki 1 | `MEDIAWIKI_CONNECTOR_TAG` | `wiki-1` | `user_metadata.tag = "wiki-1"` |
-| Wiki 2 | `MEDIAWIKI_CONNECTOR_2_TAG` | `wiki-2` | `user_metadata.tag = "wiki-2"` |
+| Connector | Env var                     | Tag value | Example                        |
+| --------- | --------------------------- | --------- | ------------------------------ |
+| Wiki 1    | `MEDIAWIKI_CONNECTOR_TAG`   | `wiki-1`  | `user_metadata.tag = "wiki-1"` |
+| Wiki 2    | `MEDIAWIKI_CONNECTOR_2_TAG` | `wiki-2`  | `user_metadata.tag = "wiki-2"` |
 
 If `tag` is not set, it falls back to `wiki_id`. You can use this tag to filter search results or chat queries to a specific wiki using metadata filters:
 
