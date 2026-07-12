@@ -23,7 +23,7 @@
   - [Notes](#notes)
   - [Licensing](#licensing)
 
-Version: 1.6.0
+Version: 1.7.0
 
 This folder provides a local Docker Compose deployment for development/testing.
 
