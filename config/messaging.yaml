@@ -1,0 +1,53 @@
+# Retriva Messaging configuration
+#
+# This file is bind-mounted at /app/config/messaging.yaml.
+# Environment variables (prefix RETRIVA_MESSAGING_) override these values.
+# Secrets should be provided via environment variables, not in this file.
+
+# --- Service ---
+enabled: true
+host: "0.0.0.0"
+port: 8005
+log_level: INFO
+
+# --- Operating mode ---
+# "global"    — deployment-level aliases, no per-user preferences.
+# "per_user"  — requires trustworthy authenticated user identity.
+mode: global
+
+# --- Channels ---
+enabled_channels: ["email"]
+default_channels: ["email"]
+allow_arbitrary_destinations: false
+
+# --- Database ---
+# Overridden by RETRIVA_MESSAGING_DATABASE_URL env var in docker-compose.
+database_url: "postgresql+psycopg2://messaging:messaging@retriva-messaging-db:5432/retriva_messaging"
+
+# --- Worker ---
+worker_poll_interval_seconds: 2.0
+worker_batch_size: 20
+worker_max_delivery_attempts: 5
+worker_retry_base_delay_seconds: 5.0
+worker_retry_max_delay_seconds: 3600.0
+worker_retry_backoff_multiplier: 2.0
+
+# --- Scheduling / expiration ---
+scheduler_poll_interval_seconds: 5.0
+expiration_check_interval_seconds: 30.0
+
+# --- Apprise backend adapter ---
+apprise_api_url: "http://apprise-api:8000"
+apprise_api_timeout_seconds: 30.0
+apprise_email_tag: "retriva-email"
+
+# --- Email channel defaults (global mode) ---
+email_from_address: "retriva@localhost"
+email_from_name: "Retriva"
+
+# --- Security ---
+redact_destinations_in_api: true
+internal_service_token: ""
+
+# --- Per-user mode ---
+per_user_identity_available: false

@@ -87,6 +87,15 @@ _auto_exclude_disabled_connectors() {
   if [[ "$email_enabled" != "on" ]]; then
     EXCLUDED_SERVICES+=("retriva-email-agent-connector")
   fi
+
+  # Messaging Extension (retriva-messaging, apprise-api, retriva-messaging-db)
+  local msg_enabled
+  msg_enabled=$(grep -E '^RETRIVA_MESSAGING_ENABLED=' "$ENV_FILE" 2>/dev/null | cut -d '=' -f 2- | tr -d '[:space:]' || true)
+  if [[ "$msg_enabled" != "on" ]]; then
+    EXCLUDED_SERVICES+=("retriva-messaging")
+    EXCLUDED_SERVICES+=("apprise-api")
+    EXCLUDED_SERVICES+=("retriva-messaging-db")
+  fi
 }
 
 # Call auto-exclusion before processing commands that start/build services.
@@ -100,7 +109,7 @@ case "$COMMAND" in
     else
       echo ".env already exists; leaving it unchanged."
     fi
-    mkdir -p data/qdrant data/core data/gateway data/connectors/mediawiki data/connectors/email logs config
+    mkdir -p data/qdrant data/core data/gateway data/connectors/mediawiki data/connectors/email data/messaging logs config
     ;;
 
   check)
@@ -109,7 +118,7 @@ case "$COMMAND" in
     docker compose version
     echo "Checking repository paths from $ENV_FILE..."
     source "$ENV_FILE" || true
-    for var in RETRIVA_CORE_DIR RETRIVA_GATEWAY_DIR RETRIVA_WEBUI_DIR RETRIVA_MEDIAWIKI_CONNECTOR_DIR RETRIVA_EMAIL_AGENT_CONNECTOR_DIR; do
+    for var in RETRIVA_CORE_DIR RETRIVA_GATEWAY_DIR RETRIVA_WEBUI_DIR RETRIVA_MEDIAWIKI_CONNECTOR_DIR RETRIVA_EMAIL_AGENT_CONNECTOR_DIR RETRIVA_MESSAGING_DIR; do
       val="${!var:-}"
       if [[ -n "$val" && -d "$val" ]]; then
         echo "OK: $var=$val"
@@ -306,10 +315,11 @@ Options:
 Connector auto-exclusion:
   Connectors with ENABLED=off (the default) in the .env file are
   automatically excluded from up-pro, up-with-connectors, and build.
-  Set ENABLED=on to enable a connector on startup:
+  Set ENABLED=on to enable a connector/extension on startup:
     MEDIAWIKI_CONNECTOR_ENABLED=on
     MEDIAWIKI_CONNECTOR_2_ENABLED=on
     EMAIL_AGENT_CONNECTOR_ENABLED=on
+    RETRIVA_MESSAGING_ENABLED=on
 
 Commands:
   init                Create .env and local folders

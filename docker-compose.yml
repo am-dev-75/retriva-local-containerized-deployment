@@ -14,6 +14,9 @@ volumes:
   email_agent_connector_state:
   whisper_models:
   redis_data:
+  messaging_db_data:
+  apprise_config:
+  messaging_state:
 
 services:
   qdrant:
@@ -473,6 +476,106 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ${EMAIL_AGENT_CONNECTOR_COMMAND:-run}
+
+  # --- Retriva Pro: Messaging Extension ---
+  # Durable, asynchronous, multi-channel notifications.
+  # Retriva Messaging is the system of record; Apprise API is a replaceable
+  # delivery adapter.  See ../retriva-messaging-extension/README.md.
+  #
+  # Three services are started:
+  #   retriva-messaging-db  — PostgreSQL (dedicated database)
+  #   apprise-api           — Apprise API server (delivery adapter)
+  #   retriva-messaging     — Messaging API + worker
+  #
+  # All three are tagged with the "pro" profile and are only started by
+  # `./scripts/manage.sh up-pro`.  The base `up` command is unaffected.
+  retriva-messaging-db:
+    image: ${MESSAGING_DB_IMAGE:-postgres:16-alpine}
+    container_name: retriva-messaging-db
+    restart: unless-stopped
+    profiles: ["pro", "messaging"]
+    environment:
+      TZ: ${TZ:-UTC}
+      POSTGRES_DB: ${MESSAGING_DB_NAME:-retriva_messaging}
+      POSTGRES_USER: ${MESSAGING_DB_USER:-messaging}
+      POSTGRES_PASSWORD: ${MESSAGING_DB_PASSWORD:-messaging}
+    volumes:
+      - messaging_db_data:/var/lib/postgresql/data
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MESSAGING_DB_USER:-messaging} -d ${MESSAGING_DB_NAME:-retriva_messaging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  apprise-api:
+    image: ${APPRISE_API_IMAGE:-caronc/apprise:latest}
+    container_name: retriva-apprise-api
+    restart: unless-stopped
+    profiles: ["pro", "messaging"]
+    environment:
+      TZ: ${TZ:-UTC}
+      # Apprise API base URL as seen from the messaging container.
+      APPRISE_API_URL: http://apprise-api:8000
+    volumes:
+      - apprise_config:/config
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8000/status || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  retriva-messaging:
+    build:
+      context: ${RETRIVA_MESSAGING_DIR:-../retriva-messaging-extension}
+      dockerfile: ${RETRIVA_MESSAGING_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_MESSAGING_IMAGE:-retriva-messaging:local}
+    container_name: retriva-messaging
+    restart: unless-stopped
+    profiles: ["pro", "messaging"]
+    env_file:
+      - ${ENV_FILE:-.env}
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_MESSAGING_ENABLED: ${RETRIVA_MESSAGING_ENABLED:-true}
+      RETRIVA_MESSAGING_HOST: 0.0.0.0
+      RETRIVA_MESSAGING_PORT: ${MESSAGING_PORT:-8005}
+      RETRIVA_MESSAGING_LOG_LEVEL: ${MESSAGING_LOG_LEVEL:-INFO}
+      RETRIVA_MESSAGING_MODE: ${RETRIVA_MESSAGING_MODE:-global}
+      RETRIVA_MESSAGING_ENABLED_CHANNELS: ${RETRIVA_MESSAGING_ENABLED_CHANNELS:-email}
+      RETRIVA_MESSAGING_DEFAULT_CHANNELS: ${RETRIVA_MESSAGING_DEFAULT_CHANNELS:-email}
+      RETRIVA_MESSAGING_ALLOW_ARBITRARY_DESTINATIONS: ${RETRIVA_MESSAGING_ALLOW_ARBITRARY_DESTINATIONS:-false}
+      RETRIVA_MESSAGING_DATABASE_URL: postgresql+psycopg2://${MESSAGING_DB_USER:-messaging}:${MESSAGING_DB_PASSWORD:-messaging}@retriva-messaging-db:5432/${MESSAGING_DB_NAME:-retriva_messaging}
+      RETRIVA_MESSAGING_APPRISE_API_URL: http://apprise-api:8000
+      RETRIVA_MESSAGING_APPRISE_EMAIL_TAG: ${RETRIVA_MESSAGING_APPRISE_EMAIL_TAG:-retriva-email}
+      RETRIVA_MESSAGING_EMAIL_FROM_ADDRESS: ${RETRIVA_MESSAGING_EMAIL_FROM_ADDRESS:-retriva@localhost}
+      RETRIVA_MESSAGING_EMAIL_FROM_NAME: ${RETRIVA_MESSAGING_EMAIL_FROM_NAME:-Retriva}
+      RETRIVA_MESSAGING_INTERNAL_SERVICE_TOKEN: ${RETRIVA_MESSAGING_INTERNAL_SERVICE_TOKEN:-}
+      RETRIVA_MESSAGING_PER_USER_IDENTITY_AVAILABLE: ${RETRIVA_MESSAGING_PER_USER_IDENTITY_AVAILABLE:-false}
+      RETRIVA_MESSAGING_CONFIG: /app/config/messaging.yaml
+    ports:
+      - "${MESSAGING_PORT:-8005}:8005"
+    volumes:
+      - ./config/messaging.yaml:/app/config/messaging.yaml:ro
+      - messaging_state:/app/state
+    depends_on:
+      retriva-messaging-db:
+        condition: service_healthy
+      apprise-api:
+        condition: service_healthy
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${MESSAGING_PORT:-8005}/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   retriva-webui:
     build:

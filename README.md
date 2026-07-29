@@ -36,7 +36,7 @@ It runs:
 - Retriva Gateway
 - Retriva WebUI
 - Whisper Server (for WebUI Speech-to-Text)
-- Retriva Pro extensions profile, currently the MediaWiki connector
+- Retriva Pro extensions profile, currently the MediaWiki connector and the Messaging extension
 
 An existing, remote service is used as the OpenAI-compatible LLM provider, so no local LLM server is deployed.
 
@@ -58,7 +58,8 @@ workspace/
 ├── retriva-core/
 ├── retriva-gateway/
 ├── retriva-webui/
-└── retriva-mediawiki-connector/
+├── retriva-mediawiki-connector/
+└── retriva-messaging-extension/
 ```
 
 If your layout differs, edit `.env` after initialization.
@@ -90,6 +91,7 @@ Ingestion:      http://localhost:8000
 Qdrant UI:      http://localhost:6333/dashboard
 Tika:           http://localhost:9998
 Whisper Server: http://localhost:8100
+Messaging:      http://localhost:8005  (Pro, if enabled)
 ```
 
 ## Retriva Pro extensions (`up-pro` vs `up`)
@@ -111,6 +113,37 @@ If the connector CLI is not yet implemented, use:
 ```bash
 ./scripts/manage.sh pro-shell
 ```
+
+### Retriva Messaging Extension
+
+The **Retriva Messaging** extension provides durable, asynchronous,
+multi-channel notifications. It is a Retriva Pro extension licensed under the
+Retriva Pro Proprietary Commercial License Agreement (see
+`../retriva-messaging-extension/LICENSE.retriva-pro`).
+
+When enabled, `up-pro` starts three additional services:
+
+| Service | Container | Description |
+|---|---|---|
+| `retriva-messaging-db` | `retriva-messaging-db` | PostgreSQL (dedicated database) |
+| `apprise-api` | `retriva-apprise-api` | Apprise API server (delivery adapter) |
+| `retriva-messaging` | `retriva-messaging` | Messaging API + worker |
+
+Retriva Messaging is the system of record; Apprise is a replaceable delivery
+adapter. No public Retriva contract, producer, or WebUI component exposes
+Apprise-specific URLs, tags, or terminology.
+
+To enable:
+
+```env
+RETRIVA_MESSAGING_ENABLED=on
+```
+
+When disabled (the default), the three messaging services are automatically
+excluded from `up-pro` and `build-pro`, so the base deployment is unaffected.
+
+See `../retriva-messaging-extension/README.md` for the full API reference,
+configuration, and architectural boundaries.
 
 ## Authentication
 
@@ -361,6 +394,8 @@ This deployment bundle is licensed under the Apache License 2.0. See the LICENSE
 
 - **Retriva Core** components (`retriva-core`, `retriva-gateway`, `retriva-webui`) are licensed under the Apache License 2.0. The default `up` command starts only these components plus third-party infrastructure (Qdrant, Tika, Redis, Whisper), so a default deployment contains only Apache-2.0-licensed code.
 - **Retriva Pro** is the commercial bundle formed by Retriva Core plus proprietary extension containers. Each extension is licensed separately and is **not** covered by the Apache 2.0 license of the core. Pro extensions are isolated behind the `pro` Docker Compose profile and are only started when you explicitly run `up-pro` (or the `up-with-connectors` alias).
-- The first Pro extension is `retriva-mediawiki-connector`, licensed under the Retriva Pro Proprietary Commercial License Agreement (see `LICENSE.retriva-pro` in that repository).
+- Pro extensions include:
+  - `retriva-mediawiki-connector`, licensed under the Retriva Pro Proprietary Commercial License Agreement (see `LICENSE.retriva-pro` in that repository).
+  - `retriva-messaging-extension`, licensed under the Retriva Pro Proprietary Commercial License Agreement (see `LICENSE.retriva-pro` in that repository).
 
 This separation ensures that the Apache-2.0-licensed core remains self-contained and that proprietary code is never pulled into a deployment unless explicitly requested.
