@@ -128,11 +128,18 @@ services:
 
       # --- OpenAI-compatible provider (default: OpenRouter) ----------------
       # Retriva core uses ONE key fanned out to every purpose via
-      # model_post_init(), plus PER-PURPOSE base URLs. To redirect ALL
-      # traffic to another provider, set LLM_PROVIDER_BASE_URL in .env; it is
-      # used as the default for embeddings, vision, chat and reranking below.
-      # Override any single purpose by setting its own *_BASE_URL in .env.
+      # model_post_init(), plus PER-PURPOSE base URLs and API keys. To
+      # redirect ALL traffic to another provider, set LLM_PROVIDER_BASE_URL
+      # in .env; it is used as the default for embeddings, vision, chat and
+      # reranking below. Override any single purpose by setting its own
+      # *_BASE_URL and/or *_API_KEY in .env.
       OPENROUTER_OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      # Per-purpose API keys (default to OPENAI_PROVIDER_API_KEY). Set these
+      # when a *_BASE_URL above points to a provider that needs a different key.
+      EMBEDDING_OPENAI_API_KEY: ${EMBEDDING_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
+      VISUAL_OPENAI_API_KEY: ${VISUAL_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
+      CHAT_OPENAI_API_KEY: ${CHAT_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
+      RETRIEVAL_RERANK_API_KEY: ${RETRIEVAL_RERANK_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
@@ -196,11 +203,18 @@ services:
 
       # --- OpenAI-compatible provider (default: OpenRouter) ----------------
       # Retriva core uses ONE key fanned out to every purpose via
-      # model_post_init(), plus PER-PURPOSE base URLs. To redirect ALL
-      # traffic to another provider, set LLM_PROVIDER_BASE_URL in .env; it is
-      # used as the default for embeddings, vision, chat and reranking below.
-      # Override any single purpose by setting its own *_BASE_URL in .env.
+      # model_post_init(), plus PER-PURPOSE base URLs and API keys. To
+      # redirect ALL traffic to another provider, set LLM_PROVIDER_BASE_URL
+      # in .env; it is used as the default for embeddings, vision, chat and
+      # reranking below. Override any single purpose by setting its own
+      # *_BASE_URL and/or *_API_KEY in .env.
       OPENROUTER_OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      # Per-purpose API keys (default to OPENAI_PROVIDER_API_KEY). Set these
+      # when a *_BASE_URL above points to a provider that needs a different key.
+      EMBEDDING_OPENAI_API_KEY: ${EMBEDDING_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
+      VISUAL_OPENAI_API_KEY: ${VISUAL_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
+      CHAT_OPENAI_API_KEY: ${CHAT_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
+      RETRIEVAL_RERANK_API_KEY: ${RETRIEVAL_RERANK_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
@@ -259,6 +273,12 @@ services:
       RETRIVA_DEFAULT_COLLECTION: ${RETRIVA_DEFAULT_COLLECTION:-retriva_chunks}
       TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
       OPENROUTER_OPENAI_API_KEY: ${OPENAI_PROVIDER_API_KEY}
+      # Per-purpose API keys (default to OPENAI_PROVIDER_API_KEY). Set these
+      # when a *_BASE_URL above points to a provider that needs a different key.
+      EMBEDDING_OPENAI_API_KEY: ${EMBEDDING_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
+      VISUAL_OPENAI_API_KEY: ${VISUAL_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
+      CHAT_OPENAI_API_KEY: ${CHAT_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
+      RETRIEVAL_RERANK_API_KEY: ${RETRIEVAL_RERANK_API_KEY:-${OPENAI_PROVIDER_API_KEY}}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
