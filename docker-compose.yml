@@ -148,6 +148,20 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
       CHAT_REASONING_EFFORT: ${CHAT_REASONING_EFFORT:-}
+      # Retrieval reranking (two-stage).  See .env.example for details.
+      RETRIEVAL_RERANK_MODEL: ${RETRIEVAL_RERANK_MODEL:-cohere/rerank-v3.5}
+      ENABLE_RETRIEVAL_RERANKING: ${ENABLE_RETRIEVAL_RERANKING:-true}
+      RETRIEVAL_RERANK_CANDIDATES: ${RETRIEVAL_RERANK_CANDIDATES:-100}
+      RETRIEVAL_RERANK_TOP_N: ${RETRIEVAL_RERANK_TOP_N:-30}
+      RETRIEVAL_RERANK_BATCH_SIZE: ${RETRIEVAL_RERANK_BATCH_SIZE:-100}
+      RETRIEVAL_RERANK_MAX_LENGTH: ${RETRIEVAL_RERANK_MAX_LENGTH:-4096}
+      # Determinism / sampling (see .env.example).  Server-side values always
+      # win; client-sent temperature/top_p via the OpenAI-compatible API are
+      # ignored with a warning.
+      CHAT_TEMPERATURE: ${CHAT_TEMPERATURE:-0.0}
+      CHAT_TOP_P: ${CHAT_TOP_P:-1.0}
+      CHAT_MAX_TOKENS: ${CHAT_MAX_TOKENS:-4096}
+      CHAT_SEED: ${CHAT_SEED:-}
 
       # Local-dev behavior
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
@@ -223,6 +237,20 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
       CHAT_REASONING_EFFORT: ${CHAT_REASONING_EFFORT:-}
+      # Retrieval reranking (two-stage).  See .env.example for details.
+      RETRIEVAL_RERANK_MODEL: ${RETRIEVAL_RERANK_MODEL:-cohere/rerank-v3.5}
+      ENABLE_RETRIEVAL_RERANKING: ${ENABLE_RETRIEVAL_RERANKING:-true}
+      RETRIEVAL_RERANK_CANDIDATES: ${RETRIEVAL_RERANK_CANDIDATES:-100}
+      RETRIEVAL_RERANK_TOP_N: ${RETRIEVAL_RERANK_TOP_N:-30}
+      RETRIEVAL_RERANK_BATCH_SIZE: ${RETRIEVAL_RERANK_BATCH_SIZE:-100}
+      RETRIEVAL_RERANK_MAX_LENGTH: ${RETRIEVAL_RERANK_MAX_LENGTH:-4096}
+      # Determinism / sampling (see .env.example).  Server-side values always
+      # win; client-sent temperature/top_p via the OpenAI-compatible API are
+      # ignored with a warning.
+      CHAT_TEMPERATURE: ${CHAT_TEMPERATURE:-0.0}
+      CHAT_TOP_P: ${CHAT_TOP_P:-1.0}
+      CHAT_MAX_TOKENS: ${CHAT_MAX_TOKENS:-4096}
+      CHAT_SEED: ${CHAT_SEED:-}
       # Optional system-prompt override (Retriva Pro / per-customer). When
       # non-empty, replaces the default grounded-QA prompt in retriva-core.
       # See .env.example for placeholder syntax.
@@ -287,6 +315,20 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
       CHAT_REASONING_EFFORT: ${CHAT_REASONING_EFFORT:-}
+      # Retrieval reranking (two-stage).  See .env.example for details.
+      RETRIEVAL_RERANK_MODEL: ${RETRIEVAL_RERANK_MODEL:-cohere/rerank-v3.5}
+      ENABLE_RETRIEVAL_RERANKING: ${ENABLE_RETRIEVAL_RERANKING:-true}
+      RETRIEVAL_RERANK_CANDIDATES: ${RETRIEVAL_RERANK_CANDIDATES:-100}
+      RETRIEVAL_RERANK_TOP_N: ${RETRIEVAL_RERANK_TOP_N:-30}
+      RETRIEVAL_RERANK_BATCH_SIZE: ${RETRIEVAL_RERANK_BATCH_SIZE:-100}
+      RETRIEVAL_RERANK_MAX_LENGTH: ${RETRIEVAL_RERANK_MAX_LENGTH:-4096}
+      # Determinism / sampling (see .env.example).  Server-side values always
+      # win; client-sent temperature/top_p via the OpenAI-compatible API are
+      # ignored with a warning.
+      CHAT_TEMPERATURE: ${CHAT_TEMPERATURE:-0.0}
+      CHAT_TOP_P: ${CHAT_TOP_P:-1.0}
+      CHAT_MAX_TOKENS: ${CHAT_MAX_TOKENS:-4096}
+      CHAT_SEED: ${CHAT_SEED:-}
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
       LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
