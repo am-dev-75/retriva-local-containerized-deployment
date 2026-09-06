@@ -169,6 +169,11 @@ services:
       GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD: ${GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD:-0.5}
       # --- Retriva Pro extensions ---
       RETRIVA_EXTENSIONS: ${RETRIVA_EXTENSIONS:-}
+      # --- Task LLM (for extensions: extraction, classification, summarization) ---
+      TASK_BASE_URL: ${TASK_BASE_URL:-}
+      TASK_MODEL: ${TASK_MODEL:-}
+      TASK_OPENAI_API_KEY: ${TASK_API_KEY:-}
+      TASK_SYSTEM_PROMPT: ${TASK_SYSTEM_PROMPT:-}
       # --- Session Document Processing ---
       SESSION_ATTACHMENT_MAX_SIZE: ${SESSION_ATTACHMENT_MAX_SIZE:-52428800}
       SESSION_ATTACHMENT_TTL_SECONDS: ${SESSION_ATTACHMENT_TTL_SECONDS:-86400}
@@ -237,6 +242,7 @@ services:
       TASK_BASE_URL: ${TASK_BASE_URL:-}
       TASK_MODEL: ${TASK_MODEL:-}
       TASK_OPENAI_API_KEY: ${TASK_API_KEY:-}
+      TASK_SYSTEM_PROMPT: ${TASK_SYSTEM_PROMPT:-}
       # Optional system-prompt override (Retriva Pro / per-customer). When
       # non-empty, replaces the default grounded-QA prompt in retriva-core.
       # See .env.example for placeholder syntax.
@@ -313,6 +319,7 @@ services:
       TASK_BASE_URL: ${TASK_BASE_URL:-}
       TASK_MODEL: ${TASK_MODEL:-}
       TASK_OPENAI_API_KEY: ${TASK_API_KEY:-}
+      TASK_SYSTEM_PROMPT: ${TASK_SYSTEM_PROMPT:-}
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
       LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
