@@ -110,6 +110,8 @@ services:
       start_period: 5s
 
   retriva-ingestion:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     build:
       context: ${RETRIVA_CORE_DIR:-../retriva-core}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
@@ -165,6 +167,12 @@ services:
       GRAPH_TRAVERSAL_MAX_NODES: ${GRAPH_TRAVERSAL_MAX_NODES:-50}
       GRAPH_TRAVERSAL_MAX_EDGES: ${GRAPH_TRAVERSAL_MAX_EDGES:-100}
       GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD: ${GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD:-0.5}
+      # --- Retriva Pro extensions ---
+      RETRIVA_EXTENSIONS: ${RETRIVA_EXTENSIONS:-}
+      # --- Session Document Processing ---
+      SESSION_ATTACHMENT_MAX_SIZE: ${SESSION_ATTACHMENT_MAX_SIZE:-52428800}
+      SESSION_ATTACHMENT_TTL_SECONDS: ${SESSION_ATTACHMENT_TTL_SECONDS:-86400}
+      SESSION_ARTIFACT_TTL_SECONDS: ${SESSION_ARTIFACT_TTL_SECONDS:-172800}
     ports:
       - "${INGESTION_PORT:-8000}:8000"
     volumes:
@@ -186,6 +194,8 @@ services:
       start_period: 30s
 
   retriva-core:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     build:
       context: ${RETRIVA_CORE_DIR:-../retriva-core}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
@@ -223,6 +233,10 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
       CHAT_REASONING_EFFORT: ${CHAT_REASONING_EFFORT:-}
+      # --- Task LLM (for extensions: extraction, classification, summarization) ---
+      TASK_BASE_URL: ${TASK_BASE_URL:-}
+      TASK_MODEL: ${TASK_MODEL:-}
+      TASK_OPENAI_API_KEY: ${TASK_API_KEY:-}
       # Optional system-prompt override (Retriva Pro / per-customer). When
       # non-empty, replaces the default grounded-QA prompt in retriva-core.
       # See .env.example for placeholder syntax.
@@ -239,6 +253,12 @@ services:
       GRAPH_TRAVERSAL_MAX_NODES: ${GRAPH_TRAVERSAL_MAX_NODES:-50}
       GRAPH_TRAVERSAL_MAX_EDGES: ${GRAPH_TRAVERSAL_MAX_EDGES:-100}
       GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD: ${GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD:-0.5}
+      # --- Retriva Pro extensions ---
+      RETRIVA_EXTENSIONS: ${RETRIVA_EXTENSIONS:-}
+      # --- Session Document Processing ---
+      SESSION_ATTACHMENT_MAX_SIZE: ${SESSION_ATTACHMENT_MAX_SIZE:-52428800}
+      SESSION_ATTACHMENT_TTL_SECONDS: ${SESSION_ATTACHMENT_TTL_SECONDS:-86400}
+      SESSION_ARTIFACT_TTL_SECONDS: ${SESSION_ARTIFACT_TTL_SECONDS:-172800}
     ports:
       - "${CORE_PORT:-8001}:8001"
     volumes:
@@ -258,6 +278,8 @@ services:
       start_period: 30s
 
   retriva-worker:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     build:
       context: ${RETRIVA_CORE_DIR:-../retriva-core}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
@@ -287,6 +309,10 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
       CHAT_REASONING_EFFORT: ${CHAT_REASONING_EFFORT:-}
+      # --- Task LLM (for extensions: extraction, classification, summarization) ---
+      TASK_BASE_URL: ${TASK_BASE_URL:-}
+      TASK_MODEL: ${TASK_MODEL:-}
+      TASK_OPENAI_API_KEY: ${TASK_API_KEY:-}
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
       LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
@@ -301,6 +327,12 @@ services:
       GRAPH_TRAVERSAL_MAX_NODES: ${GRAPH_TRAVERSAL_MAX_NODES:-50}
       GRAPH_TRAVERSAL_MAX_EDGES: ${GRAPH_TRAVERSAL_MAX_EDGES:-100}
       GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD: ${GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD:-0.5}
+      # --- Retriva Pro extensions ---
+      RETRIVA_EXTENSIONS: ${RETRIVA_EXTENSIONS:-}
+      # --- Session Document Processing ---
+      SESSION_ATTACHMENT_MAX_SIZE: ${SESSION_ATTACHMENT_MAX_SIZE:-52428800}
+      SESSION_ATTACHMENT_TTL_SECONDS: ${SESSION_ATTACHMENT_TTL_SECONDS:-86400}
+      SESSION_ARTIFACT_TTL_SECONDS: ${SESSION_ARTIFACT_TTL_SECONDS:-172800}
     volumes:
       - retriva_core_storage:/app/storage
     depends_on:

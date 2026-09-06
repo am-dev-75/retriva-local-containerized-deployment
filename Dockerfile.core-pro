@@ -1,0 +1,29 @@
+# Dockerfile.core-pro — Retriva Core + Pro extensions (CRM Assistant, Web Research)
+#
+# Build context must be the workspace parent directory, for example:
+#   RETRIVA_CORE_DIR=../retriva-core
+#   RETRIVA_CORE_DOCKERFILE=retriva-local-containerized-deployment/Dockerfile.core-pro
+#
+# This Dockerfile builds the standard Retriva Core image and then installs
+# the Pro extension packages (retriva-web-research, retriva-crm-assistant)
+# so they are available when Core loads extensions via RETRIVA_EXTENSIONS.
+
+FROM retriva-core:local AS base
+
+USER root
+WORKDIR /app
+
+# Install Retriva Web Research (shared Pro module).
+COPY retriva-web-research /tmp/retriva-web-research
+RUN pip install --no-cache-dir /tmp/retriva-web-research && \
+    rm -rf /tmp/retriva-web-research
+
+# Install Retriva CRM Assistant (Pro extension).
+COPY retriva-crm-assistant /tmp/retriva-crm-assistant
+RUN pip install --no-cache-dir /tmp/retriva-crm-assistant && \
+    rm -rf /tmp/retriva-crm-assistant
+
+# RETRIVA_EXTENSIONS is set via docker-compose environment to load the
+# CRM Assistant extension at startup.
+
+USER appuser
