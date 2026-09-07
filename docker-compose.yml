@@ -113,7 +113,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     build:
-      context: ${RETRIVA_CORE_DIR:-../retriva-core}
+      context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
     image: ${RETRIVA_INGESTION_IMAGE:-retriva-ingestion:local}
     container_name: retriva-ingestion
@@ -202,7 +202,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     build:
-      context: ${RETRIVA_CORE_DIR:-../retriva-core}
+      context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
     image: ${RETRIVA_CORE_IMAGE:-retriva-core:local}
     container_name: retriva-core
@@ -287,7 +287,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     build:
-      context: ${RETRIVA_CORE_DIR:-../retriva-core}
+      context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
     image: ${RETRIVA_INGESTION_IMAGE:-retriva-ingestion:local}
     container_name: retriva-worker
@@ -430,7 +430,7 @@ services:
       MEDIAWIKI_CONNECTOR_COLLECTION: ${MEDIAWIKI_CONNECTOR_COLLECTION:-}
       MEDIAWIKI_CONNECTOR_KB_IDS: ${MEDIAWIKI_CONNECTOR_KB_IDS:-}
       MEDIAWIKI_CONNECTOR_TAG: ${MEDIAWIKI_CONNECTOR_TAG:-}
-      MEDIAWIKI_CONNECTOR_PUBLIC_URL: ${MEDIAWIKI_CONNECTOR_PUBLIC_URL:-}
+      MEDIAWIKI_CONNECTOR_PUBLIC_URL: ${MEDIAWIKI_CONNECTOR_PUBLIC_URL:-http://localhost:${INGESTION_PORT:-8000}/api.php}
       MEDIAWIKI_USERNAME: ${MEDIAWIKI_CONNECTOR_USERNAME:-}
       MEDIAWIKI_BOT_PASSWORD: ${MEDIAWIKI_CONNECTOR_BOT_PASSWORD:-}
       MEDIAWIKI_CONFIG: /app/config/mediawiki.yaml
@@ -641,7 +641,7 @@ services:
       context: ${RETRIVA_WEBUI_DIR:-../retriva-webui}
       dockerfile: ${RETRIVA_WEBUI_DOCKERFILE:-Dockerfile}
       args:
-        VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:8002}
+        VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:${GATEWAY_PORT:-8002}}
         VITE_RETRIVA_ENABLE_VOICE_INPUT: ${VITE_RETRIVA_ENABLE_VOICE_INPUT:-true}
         VITE_RETRIVA_AUTH_PROVIDER: ${VITE_RETRIVA_AUTH_PROVIDER:-none}
         VITE_RETRIVA_ENTRA_CLIENT_ID: ${VITE_RETRIVA_ENTRA_CLIENT_ID:-}
@@ -655,7 +655,7 @@ services:
       - ${ENV_FILE:-.env}
     environment:
       TZ: ${TZ:-UTC}
-      VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:8002}
+      VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:${GATEWAY_PORT:-8002}}
       RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL_FOR_WEBUI:-http://retriva-gateway:8002}
       VITE_SPEECH_INPUT_MODE: ${VITE_SPEECH_INPUT_MODE:-gateway}
       VITE_RETRIVA_ENABLE_VOICE_INPUT: ${VITE_RETRIVA_ENABLE_VOICE_INPUT:-true}

@@ -1,18 +1,56 @@
 # Dockerfile.core-pro — Retriva Core + Pro extensions (CRM Assistant, Web Research)
 #
-# Build context must be the workspace parent directory, for example:
-#   RETRIVA_CORE_DIR=../retriva-core
+# Build context must be the workspace parent directory (..), so that both
+# retriva-core/ and the Pro extension repos are accessible:
+#
+#   RETRIVA_CORE_CONTEXT=..
 #   RETRIVA_CORE_DOCKERFILE=retriva-local-containerized-deployment/Dockerfile.core-pro
 #
 # This Dockerfile builds the standard Retriva Core image and then installs
 # the Pro extension packages (retriva-web-research, retriva-crm-assistant)
 # so they are available when Core loads extensions via RETRIVA_EXTENSIONS.
 
-FROM retriva-core:local AS base
+# Use Python 3.12 slim as base image
+FROM python:3.12-slim
 
-USER root
+# Prevent Python from writing pyc files and keep stdout/stderr unbuffered
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+# Set PYTHONPATH so the app can resolve the retriva package
+ENV PYTHONPATH=/app/src
+
+# Set working directory
 WORKDIR /app
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-ita \
+    ghostscript \
+    curl \
+    build-essential \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Give the non-root user a writable TorchInductor kernel cache dir
+ENV TORCHINDUCTOR_CACHE_DIR=/app/.torchinductor
+
+# Create a non-root user and group
+RUN useradd -m -U appuser && chown -R appuser:appuser /app
+
+# Copy only requirements to cache them in docker layer
+COPY retriva-core/requirements.txt /app/
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy the Core source code
+COPY --chown=appuser:appuser retriva-core/src /app/src
+
+# --- Retriva Pro extensions ---
 # Install Retriva Web Research (shared Pro module).
 COPY retriva-web-research /tmp/retriva-web-research
 RUN pip install --no-cache-dir /tmp/retriva-web-research && \
@@ -23,7 +61,17 @@ COPY retriva-crm-assistant /tmp/retriva-crm-assistant
 RUN pip install --no-cache-dir /tmp/retriva-crm-assistant && \
     rm -rf /tmp/retriva-crm-assistant
 
-# RETRIVA_EXTENSIONS is set via docker-compose environment to load the
-# CRM Assistant extension at startup.
-
+# Make rapidocr models dir writable so Docling can download model variants at runtime
+RUN mkdir -p /app/storage && chown -R appuser:appuser /app/storage && \
+    chmod -R a+rw /usr/local/lib/python3.12/site-packages/rapidocr/models/
 USER appuser
+
+# Expose ports (8000 for Ingestion API, 8001 for OpenAI API)
+EXPOSE 8000 8001
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8001/health || curl -f http://localhost:8000/health || exit 1
+
+# The default command runs the OpenAI API (Core). It can be overridden in compose.
+CMD ["python", "-m", "retriva.openai_api", "--host", "0.0.0.0", "--port", "8001"]
