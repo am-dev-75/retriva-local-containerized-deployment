@@ -1,0 +1,51 @@
+# SearXNG configuration for the internal Retriva deployment.
+#
+# Mounted read-only at /etc/searxng/settings.yml in the retriva-searxng
+# container.  Based on SearXNG defaults (use_default_settings: true) with:
+# - JSON output enabled (required by SearxngSearchProvider);
+# - a conservative, administrator-controlled upstream engine set for
+#   automated company research (see docs/local-deployment.md);
+# - the secret key injected from the environment (SEARXNG_SECRET) — never
+#   committed to the repository.
+#
+# The limiter is intentionally DISABLED: this instance is reachable only on
+# the internal Docker network by trusted Retriva components, and Retriva Web
+# Research applies its own concurrency/interval limits.  The SearXNG limiter
+# would additionally require Valkey and correct forwarded-header handling
+# (see ADR-014 in retriva-crm-assistant/docs/adr/).
+use_default_settings: true
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  secret_key: "${SEARXNG_SECRET}"
+  limiter: false
+  image_proxy: false
+  public_instance: false
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  default_lang: "auto"
+  formats:
+    - html
+    - json
+
+engines:
+  # Conservative initial engine set for company/technical research.
+  # Each engine was assessed for result quality, localization, automated-
+  # query tolerance, CAPTCHA frequency, and latency (ADR-014).
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: wikidata
+    disabled: false
+  - name: openstreetmap
+    disabled: false
+  - name: bing
+    disabled: true   # frequent bot-detection challenges for datacenter IPs
+  - name: google
+    disabled: true   # aggressive CAPTCHA for datacenter IPs
