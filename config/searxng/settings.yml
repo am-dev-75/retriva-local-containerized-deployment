@@ -33,8 +33,12 @@ search:
 
 engines:
   # Conservative initial engine set for company/technical research.
-  # Each engine was assessed for result quality, localization, automated-
-  # query tolerance, CAPTCHA frequency, and latency (ADR-014).
+  # NOTE: `use_default_settings: true` MERGES the default engine list, so
+  # every default-enabled engine not explicitly disabled here also runs.
+  # The entries below disable the default-enabled general-category engines
+  # that add upstream load without value for company research (translation
+  # and currency answerers), plus the bot-detection-prone web engines.
+  # Verified against the running instance's /config endpoint.
   - name: duckduckgo
     disabled: false
   - name: brave
@@ -47,5 +51,19 @@ engines:
     disabled: false
   - name: bing
     disabled: true   # frequent bot-detection challenges for datacenter IPs
+  - name: bing images
+    disabled: true
+  - name: bing news
+    disabled: true
+  - name: bing videos
+    disabled: true
   - name: google
     disabled: true   # aggressive CAPTCHA for datacenter IPs
+  - name: currency
+    disabled: true   # default-enabled; irrelevant to company research
+  - name: lingva
+    disabled: true   # translation answerer
+  - name: dictzone
+    disabled: true   # translation answerer
+  - name: mymemory translated
+    disabled: true   # translation answerer
