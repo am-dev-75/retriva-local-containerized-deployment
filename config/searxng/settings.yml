@@ -45,8 +45,11 @@ engines:
     disabled: false
   - name: wikipedia
     disabled: false
+    timeout: 6.0   # measured: ~400ms standalone but 3s default times out
+                    # under multi-engine fan-out from this network
   - name: wikidata
     disabled: false
+    timeout: 6.0   # same rationale as wikipedia
   - name: openstreetmap
     disabled: false
   - name: bing
