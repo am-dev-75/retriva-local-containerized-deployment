@@ -96,3 +96,46 @@ Readiness states reported for SearXNG: `unreachable`, `json_disabled`,
 `search_failed`, `all_engines_failed`, `partial`, `ok` — only `ok`/`partial`
 count as production-capable, and qualification requiring public research is
 refused otherwise (never silently falling back to mock providers).
+
+## Deferred acceptance test — reduced CRM qualification with GENERAL_WEB capability (2026-09-13)
+
+Executed after upstream recovery restored `GENERAL_WEB` capability
+(brave healthy; duckduckgo/google cse/wikidata still degraded).
+
+**Setup:** 3-candidate attachment uploaded to a fresh session
+(`acc_1789310901`), qualification run via `POST /api/v2/crm/qualify`
+against KB `dept-sales` (active ICP `icp_1` v1, portfolio
+`portfolio_3f19f37039` v1, GraphRAG enabled). Candidates: Phoenix Contact
+(domain given), Murrelektronik (domain given), Glen Dimplex Thermal
+Solutions (discovery required).
+
+**Recorded results:**
+
+| Item | Result |
+|---|---|
+| Readiness before job | `GENERAL_WEB`, status `partial` (google cse flagged) |
+| Readiness after job | `GENERAL_WEB`, status `partial` (duckduckgo, google cse, wikidata degraded) |
+| Candidates processed | 7 mentions extracted → 3 real organizations qualified (4 non-candidate mentions correctly filtered as `not_a_fit`/review) |
+| Searches per subject | 2 per organization (company + products templates) |
+| Budget usage | 6 of 150 job queries; well under 10/min and 120/h limits |
+| Known-domain path | Used for Phoenix Contact and Murrelektronik (direct official-site fetch, 0 search queries for the domain-root evidence) |
+| Circuit-breaker transitions | None opened during the job (no captcha/429 bursts); brave remained CLOSED and served results |
+| Pages retrieved | Official sites + Wikipedia fetched via ControlledHttpProvider with provenance (URL, title, retrieved_at, content hash) |
+| Evidence accepted | Phoenix Contact: public confidence 1.00 with cited official-source excerpts; others limited by upstream degradation |
+| ICP fit / CCO relevance | Produced for all real candidates (Phoenix Contact: best offering Cco V2B relevance 0.26; honest `not_a_fit` where evidence did not support fit) |
+| Artifacts | Markdown report + XLSX report both generated and downloadable |
+| Final warnings | GraphRAG bounded-neighborhood scope statement; graph queried but contributed nothing (vector_only mode — honest reporting) |
+| Upstream-blocked window caused? | **No** — brave continued serving results after the job; no new CAPTCHA/429 window triggered |
+
+**Extraction-quality note (not a search defect):** the plain-text attachment
+formatting caused 4 of 7 mentions to be extracted as fragmentary candidates
+("Co. KG", "Industrial", "Automation") — flagged `extraction_review_required`
+and correctly excluded from qualification. This is candidate-extraction
+behavior on unstructured input, classified as **qualification pipeline
+(extraction input format)**, not a search/control defect.
+
+**Verdict: ACCEPTED.** SearXNG-backed reduced CRM qualification completes
+end-to-end with meaningful public evidence, cited underlying sources,
+honest capability/tier reporting, and no upstream-blocked window. The
+milestone "Integrate and operationally validate SearXNG as Retriva Web
+Research's default self-hosted search provider" is closed.
