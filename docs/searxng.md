@@ -53,6 +53,33 @@ Rate limiting is applied Retriva-side (`CRM_SEARXNG_MAX_CONCURRENT`,
 instance is internal-only and its limiter would add a Valkey dependency
 (see ADR-014 for the reasoning and revisit triggers).
 
+## Search budgets, circuit breaker, and degradation control (2026-09-13)
+
+Upstream engines flag the egress IP for **hours** (not the 180 s SearXNG
+suspension) after a query burst. The following controls bound the damage:
+
+- **Rolling search budgets** (`ResearchLimits` in retriva-web-research):
+  3 queries/subject, 150/job, 10/rolling-minute, 120/rolling-hour.
+  Exhaustion returns explicit structured warnings and marks the result
+  partial — searches are never silently skipped.
+- **Per-engine circuit breaker** (`SearxngSearchProvider`): 3 consecutive
+  captcha/rate-limit failures → OPEN (900 s cooldown) → one bounded
+  HALF_OPEN probe → CLOSED on success / OPEN again on failure. Timeouts
+  never open the breaker. State via `get_diagnostics()`.
+- **Capability levels** in readiness: `NONE` < `IDENTITY_ONLY`
+  (wikipedia/wikidata only) < `GENERAL_WEB` < `FULL_PUBLIC_RESEARCH_AVAILABLE`.
+  CRM qualification requires `GENERAL_WEB` or better; identity-level
+  evidence alone cannot qualify prospects.
+- **Known-domain direct path**: when a candidate/reference organization has
+  a credible domain, the official site is fetched directly (0 search
+  queries, cached, single fetch — not a crawler) before any broad search.
+- **Bounded resource cache**: 512 entries, 300 s TTL (60 s negative),
+  tenant-scoped keys that never contain candidate or session IDs.
+
+Known upstream behavior from measurement: wikipedia only answers
+single-token queries (opensearch title matching), so IDENTITY_ONLY degraded
+mode yields identity-level evidence only.
+
 ## Start / verify
 
 ```bash
