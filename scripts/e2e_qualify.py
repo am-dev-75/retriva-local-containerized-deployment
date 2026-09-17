@@ -902,14 +902,19 @@ def main(argv=None) -> int:
         if js.exists():
             j = json.loads(js.read_text())
             manifest["job_id"] = j.get("job_id")
-            manifest["session_id"] = j.get("session_id")
+            manifest["session_id"] = j.get("session_id") or manifest["session_id"]
         if manifest["session_id"] is None:
             # session_id is generated inside run_qualification; recover from
-            # chat_request.json or upload URL in execution.log
+            # chat_request.json or the upload URL in execution.log
             cr = ev.path / "chat_request.json"
             if cr.exists():
                 manifest["session_id"] = json.loads(
                     cr.read_text()).get("session_id")
+        if manifest["session_id"] is None:
+            log_text = (ev.path / "execution.log").read_text()
+            m = re.search(r"session ([0-9a-f-]{36}): uploading", log_text)
+            if m:
+                manifest["session_id"] = m.group(1)
         (ev.path / "run_manifest.json").write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False))
         os.chmod(ev.path / "run_manifest.json", 0o444)
