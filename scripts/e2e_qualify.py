@@ -225,6 +225,25 @@ def sha256_file(path: Path) -> str:
 # Upload (session-scoped attachment; NEVER ingested)
 # ---------------------------------------------------------------------------
 
+XLSX_MIME = ("application/vnd.openxmlformats-officedocument."
+             "spreadsheetml.sheet")
+
+
+def guess_mime(filename: str) -> str:
+    """MIME for the multipart file part. The server uses this value for
+    parser selection (file.content_type), so it MUST be the real type —
+    application/octet-stream would route .xlsx to the plain-text parser
+    and yield zero candidates."""
+    ext = Path(filename).suffix.lower()
+    return {
+        ".xlsx": XLSX_MIME,
+        ".csv": "text/csv",
+        ".pdf": "application/pdf",
+        ".md": "text/markdown",
+        ".txt": "text/plain",
+    }.get(ext, "application/octet-stream")
+
+
 def upload_workbook(t: Transport, gateway: str, session_id: str,
                     workbook: Path, logger: RunLogger) -> dict:
     boundary = f"----e2eBoundary{uuid.uuid4().hex}"
@@ -232,7 +251,7 @@ def upload_workbook(t: Transport, gateway: str, session_id: str,
     body = b"".join([
         f"--{boundary}\r\n".encode(),
         f'Content-Disposition: form-data; name="file"; filename="{workbook.name}"\r\n'.encode(),
-        b"Content-Type: application/octet-stream\r\n\r\n",
+        f"Content-Type: {guess_mime(workbook.name)}\r\n\r\n".encode(),
         wb_bytes, b"\r\n",
         f"--{boundary}--\r\n".encode(),
     ])

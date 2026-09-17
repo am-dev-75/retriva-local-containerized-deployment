@@ -767,9 +767,22 @@ class TestConfigAndEvidence(unittest.TestCase):
         self.assertNotIn("/parse", urls)
         # Upload body is multipart with the workbook bytes
         up = [r for r in f.requests if r[0] == "POST" and "/attachments" in r[1]][0]
-        self.assertIn(b"multipart/form-data", up[3]["Content-Type"].encode()
-                      if isinstance(up[3]["Content-Type"], str)
-                      else b"multipart/form-data")
+        self.assertIn("multipart/form-data", up[3]["Content-Type"])
+
+    def test_upload_sends_correct_xlsx_mime(self):
+        """The server selects its parser from the multipart part's
+        Content-Type; sending octet-stream would misroute .xlsx to the
+        plain-text parser and yield zero candidates (found in live run)."""
+        f = FakeHTTP()
+        f.job = ok_job()
+        f.results = ok_results()
+        f.artifacts = std_artifacts()
+        h = Harness(self.tmp, f)
+        h.run(base_args(tmpdir=self.tmp))
+        up = [r for r in f.requests if r[0] == "POST" and "/attachments" in r[1]][0]
+        self.assertIn(
+            b"Content-Type: application/vnd.openxmlformats-officedocument"
+            b".spreadsheetml.sheet", up[2])
 
     def test_exit_code_contract_documented(self):
         """Every outcome maps to its documented exit code."""
