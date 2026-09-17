@@ -75,7 +75,7 @@ def ok_results(n=2, cco="cco_global_1", cco_ver=3, cco_hash="abc123",
         ],
         "source_reconciliation": {
             "total_rows_detected": reported, "total_rows_accepted": reported,
-            "total_rows_reported": reported, "invariant_ok": invariant,
+            "reported_records": reported, "invariant_ok": invariant,
         },
         "global_cco": {"global_cco_id": cco, "name": "CCO", "version": cco_ver,
                         "source_hash": cco_hash, "offering_families": []},

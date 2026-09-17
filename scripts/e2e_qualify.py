@@ -458,10 +458,10 @@ def validate_xlsx(data: bytes, results: dict) -> list:
                 problems.append(f"XLSX missing worksheet: {RECONCILIATION_SHEET}")
             else:
                 rec = (results.get("source_reconciliation") or {})
-                reported = rec.get("total_rows_reported")
+                reported = rec.get("reported_records")
                 if not isinstance(reported, int) or reported < 0:
                     problems.append("results payload missing valid "
-                                    "source_reconciliation.total_rows_reported")
+                                    "source_reconciliation.reported_records")
     except zipfile.BadZipFile:
         problems.append("XLSX bytes are not a valid ZIP archive")
     return problems
