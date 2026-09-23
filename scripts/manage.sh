@@ -300,6 +300,8 @@ case "$COMMAND" in
     echo
     echo "PostgreSQL stack started. pgAdmin: http://${RETRIVA_PGADMIN_BIND_ADDR:-127.0.0.1}:${RETRIVA_PGADMIN_PORT:-5050}"
     echo "Connect pgAdmin to host 'retriva-postgres' (internal network, port 5432)."
+    echo "Note: the pgAdmin UI credentials apply on the FIRST initialization"
+    echo "of the retriva_pgadmin_data volume only."
     echo "Activate the runtime store by setting CRM_PG_ENABLED=true and restarting the Pro services."
     ;;
 

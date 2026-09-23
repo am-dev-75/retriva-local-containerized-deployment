@@ -63,6 +63,13 @@ pgAdmin cannot connect: see
 readiness report, pgAdmin connection via the internal hostname
 `retriva-postgres`).
 
+pgAdmin rejects the UI login ("Incorrect username or password") after
+the UI email/password were changed in `.env`: pgAdmin seeds its initial
+user on the FIRST boot of the `retriva_pgadmin_data` volume only.  To
+apply new UI credentials, stop and remove `retriva-pgadmin`, delete
+that volume (pgAdmin config only; PostgreSQL data is unaffected), and
+start it again.
+
 ## Clean reset
 
 ```bash

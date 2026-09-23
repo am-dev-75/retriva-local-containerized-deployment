@@ -140,7 +140,7 @@ pgAdmin is pre-registered with the internal server definition in
 `config/pgadmin/servers.json` (no credentials stored in it):
 
 1. Open `http://127.0.0.1:5050`.
-2. Log in with `RETRIVA_PGADMIN_EMAIL` / `RETRIVA_PGADMIN_UI_PASSWORD`
+2. Log in with `RETRIVA_PGADMIN_UI_EMAIL` / `RETRIVA_PGADMIN_UI_PASSWORD`
    (the email is optional and defaults to `ops@example.com`; reserved
    domains such as `.local` are rejected by pgAdmin's validation).
 3. The server **Retriva PostgreSQL (internal)** is pre-registered with:
@@ -151,6 +151,14 @@ pgAdmin is pre-registered with the internal server definition in
    - Username: `retriva_pgadmin_operator`;
    - Password: your `CRM_PGADMIN_UI_OPERATOR_PASSWORD`.
 4. Click Save — the connection is stored in pgAdmin's own volume.
+
+> **Important — first initialization only:** `RETRIVA_PGADMIN_UI_EMAIL`
+> and `RETRIVA_PGADMIN_UI_PASSWORD` seed pgAdmin's initial user the
+> FIRST time the `retriva_pgadmin_data` volume boots; later changes to
+> those variables are ignored by the running instance.  To apply new
+> UI credentials, stop `retriva-pgadmin`, remove its container and the
+> `retriva_pgadmin_data` volume (pgAdmin's own config only — the
+> PostgreSQL data volume is untouched), then start it again.
 
 ### Network policy
 
