@@ -121,9 +121,10 @@ class ComposePgStack(unittest.TestCase):
         self.assertIn("CRM_PG_MIGRATOR_PASSWORD", mig)
         # The bootstrap step carries admin + all five role credentials.
         self.assertIn("CRM_PG_ADMIN_PASSWORD", boot)
-        for role in ("MIGRATOR", "APPLICATION", "IMPORTER", "READONLY",
-                     "PGADMIN_OPERATOR"):
+        for role in ("MIGRATOR", "APPLICATION", "IMPORTER", "READONLY"):
             self.assertIn(f"CRM_PG_{role}_PASSWORD", boot)
+        # The pgAdmin operator credential uses the dedicated UI name.
+        self.assertIn("CRM_PGADMIN_UI_OPERATOR_PASSWORD", boot)
         # Ordering: migrate waits for the bootstrap one-shot to succeed.
         self.assertIn("condition: service_completed_successfully", mig)
         self.assertIn("condition: service_healthy", boot)
@@ -173,8 +174,8 @@ class EnvExampleContract(unittest.TestCase):
                     "CRM_PG_APPLICATION_PASSWORD=",
                     "CRM_PG_IMPORTER_PASSWORD=",
                     "CRM_PG_READONLY_PASSWORD=",
-                    "CRM_PG_PGADMIN_OPERATOR_PASSWORD=",
-                    "RETRIVA_PGADMIN_PASSWORD="):
+                    "CRM_PGADMIN_UI_OPERATOR_PASSWORD=",
+                    "RETRIVA_PGADMIN_UI_PASSWORD="):
             self.assertIn(var, text)
         # Real credentials are never committed: every PostgreSQL /
         # pgAdmin password line in the example must be empty (values
@@ -185,8 +186,8 @@ class EnvExampleContract(unittest.TestCase):
             "CRM_PG_APPLICATION_PASSWORD",
             "CRM_PG_IMPORTER_PASSWORD",
             "CRM_PG_READONLY_PASSWORD",
-            "CRM_PG_PGADMIN_OPERATOR_PASSWORD",
-            "RETRIVA_PGADMIN_PASSWORD",
+            "CRM_PGADMIN_UI_OPERATOR_PASSWORD",
+            "RETRIVA_PGADMIN_UI_PASSWORD",
         )
         for line in text.splitlines():
             for var in pg_secret_vars:
@@ -195,7 +196,7 @@ class EnvExampleContract(unittest.TestCase):
         # File indirection documented for every password.
         for var in ("RETRIVA_PG_ADMIN_PASSWORD_FILE",
                     "CRM_PG_MIGRATOR_PASSWORD_FILE",
-                    "RETRIVA_PGADMIN_PASSWORD_FILE"):
+                    "RETRIVA_PGADMIN_UI_PASSWORD_FILE"):
             self.assertIn(f"#{var}=", text)
         # Runtime activation is off by default (reversible phase).
         self.assertIn("CRM_PG_ENABLED=false", text)

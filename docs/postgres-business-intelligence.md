@@ -140,14 +140,14 @@ pgAdmin is pre-registered with the internal server definition in
 `config/pgadmin/servers.json` (no credentials stored in it):
 
 1. Open `http://127.0.0.1:5050`.
-2. Log in with `RETRIVA_PGADMIN_EMAIL` / `RETRIVA_PGADMIN_PASSWORD`.
+2. Log in with `RETRIVA_PGADMIN_EMAIL` / `RETRIVA_PGADMIN_UI_PASSWORD`.
 3. The server **Retriva PostgreSQL (internal)** is pre-registered with:
    - Host: `retriva-postgres` (the internal Docker hostname — use it,
      not `localhost`, because pgAdmin runs in its own container);
    - Port: `5432`;
    - Database: `retriva` (value of `RETRIVA_PG_DATABASE`);
    - Username: `retriva_pgadmin_operator`;
-   - Password: your `CRM_PG_PGADMIN_OPERATOR_PASSWORD`.
+   - Password: your `CRM_PGADMIN_UI_OPERATOR_PASSWORD`.
 4. Click Save — the connection is stored in pgAdmin's own volume.
 
 ### Network policy
