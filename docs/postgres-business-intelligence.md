@@ -141,7 +141,8 @@ pgAdmin is pre-registered with the internal server definition in
 
 1. Open `http://127.0.0.1:5050`.
 2. Log in with `RETRIVA_PGADMIN_EMAIL` / `RETRIVA_PGADMIN_UI_PASSWORD`
-   (the email is optional and defaults to `ops@retriva.local`).
+   (the email is optional and defaults to `ops@example.com`; reserved
+   domains such as `.local` are rejected by pgAdmin's validation).
 3. The server **Retriva PostgreSQL (internal)** is pre-registered with:
    - Host: `retriva-postgres` (the internal Docker hostname — use it,
      not `localhost`, because pgAdmin runs in its own container);

@@ -840,8 +840,9 @@ services:
       - ./config/pgadmin/servers.json:/pgadmin4/servers.json:ro
     environment:
       TZ: ${TZ:-UTC}
-      # Optional: defaults to ops@retriva.local when unset.
-      PGADMIN_DEFAULT_EMAIL: ${RETRIVA_PGADMIN_EMAIL:-ops@retriva.local}
+      # Optional: defaults to ops@example.com when unset. Must be a
+      # valid, non-reserved domain (pgAdmin rejects e.g. .local).
+      PGADMIN_DEFAULT_EMAIL: ${RETRIVA_PGADMIN_EMAIL:-ops@example.com}
       # Set exactly ONE of the two in .env.
       PGADMIN_DEFAULT_PASSWORD: ${RETRIVA_PGADMIN_UI_PASSWORD:-}
       PGADMIN_DEFAULT_PASSWORD_FILE: ${RETRIVA_PGADMIN_UI_PASSWORD_FILE:-}
