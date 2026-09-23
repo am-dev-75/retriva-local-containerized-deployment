@@ -109,7 +109,7 @@ _require_db_env() {
     RETRIVA_PG_ADMIN_PASSWORD CRM_PG_MIGRATOR_PASSWORD
     CRM_PG_APPLICATION_PASSWORD CRM_PG_IMPORTER_PASSWORD
     CRM_PG_READONLY_PASSWORD CRM_PGADMIN_UI_OPERATOR_PASSWORD
-    RETRIVA_PGADMIN_EMAIL RETRIVA_PGADMIN_UI_PASSWORD
+    RETRIVA_PGADMIN_UI_PASSWORD
   )
   for var in "${vars[@]}"; do
     value=$(grep -E "^${var}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d '=' -f 2- | tr -d '[:space:]' || true)
