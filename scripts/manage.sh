@@ -98,6 +98,47 @@ _auto_exclude_disabled_connectors() {
   fi
 }
 
+# PostgreSQL Business Intelligence Database ("db" profile): fail fast
+# when the credentials the stack requires are not configured (value or
+# mounted secret file) in the .env file.
+_require_db_env() {
+  require_env
+  local missing=()
+  local value file_var file_value
+  local vars=(
+    RETRIVA_PG_ADMIN_PASSWORD CRM_PG_MIGRATOR_PASSWORD
+    CRM_PG_APPLICATION_PASSWORD CRM_PG_IMPORTER_PASSWORD
+    CRM_PG_READONLY_PASSWORD CRM_PG_PGADMIN_OPERATOR_PASSWORD
+    RETRIVA_PGADMIN_EMAIL RETRIVA_PGADMIN_PASSWORD
+  )
+  for var in "${vars[@]}"; do
+    value=$(grep -E "^${var}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d '=' -f 2- | tr -d '[:space:]' || true)
+    file_var=""
+    case "$var" in
+      RETRIVA_PG_ADMIN_PASSWORD) file_var=RETRIVA_PG_ADMIN_PASSWORD_FILE ;;
+      CRM_PG_MIGRATOR_PASSWORD) file_var=CRM_PG_MIGRATOR_PASSWORD_FILE ;;
+      CRM_PG_APPLICATION_PASSWORD) file_var=CRM_PG_APPLICATION_PASSWORD_FILE ;;
+      CRM_PG_IMPORTER_PASSWORD) file_var=CRM_PG_IMPORTER_PASSWORD_FILE ;;
+      CRM_PG_READONLY_PASSWORD) file_var=CRM_PG_READONLY_PASSWORD_FILE ;;
+      CRM_PG_PGADMIN_OPERATOR_PASSWORD) file_var=CRM_PG_PGADMIN_OPERATOR_PASSWORD_FILE ;;
+      RETRIVA_PGADMIN_PASSWORD) file_var=RETRIVA_PGADMIN_PASSWORD_FILE ;;
+    esac
+    file_value=""
+    if [[ -n "$file_var" ]]; then
+      file_value=$(grep -E "^${file_var}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d '=' -f 2- | tr -d '[:space:]' || true)
+    fi
+    if [[ -z "$value" && -z "$file_value" ]]; then
+      missing+=("$var")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "ERROR: the following variables must be set (value or _FILE) in $ENV_FILE before starting the database:" >&2
+    printf '       %s\n' "${missing[@]}" >&2
+    echo "Generate local secrets with: python -c 'import secrets; print(secrets.token_urlsafe(32))'" >&2
+    exit 1
+  fi
+}
+
 # Call auto-exclusion before processing commands that start/build services.
 _auto_exclude_disabled_connectors
 
@@ -253,6 +294,56 @@ case "$COMMAND" in
     compose --profile pro run --rm retriva-mediawiki-connector bash
     ;;
 
+  db-up)
+    _require_db_env
+    compose --profile db up -d retriva-postgres retriva-pg-bootstrap retriva-pg-migrate retriva-pgadmin
+    echo
+    echo "PostgreSQL stack started. pgAdmin: http://${RETRIVA_PGADMIN_BIND_ADDR:-127.0.0.1}:${RETRIVA_PGADMIN_PORT:-5050}"
+    echo "Connect pgAdmin to host 'retriva-postgres' (internal network, port 5432)."
+    echo "Activate the runtime store by setting CRM_PG_ENABLED=true and restarting the Pro services."
+    ;;
+
+  db-down)
+    require_env
+    compose --profile db --profile pgadmin down
+    ;;
+
+  db-migrate)
+    require_env
+    compose --profile db run --rm retriva-pg-migrate
+    ;;
+
+  db-status)
+    require_env
+    compose --profile db run --rm retriva-pg-migrate python -m retriva_crm_assistant.postgres.migrate status
+    ;;
+
+  db-verify)
+    require_env
+    compose --profile db run --rm retriva-pg-migrate python -m retriva_crm_assistant.postgres.migrate verify
+    ;;
+
+  db-readiness)
+    require_env
+    compose --profile db run --rm retriva-pg-migrate python -m retriva_crm_assistant.postgres.migrate readiness
+    ;;
+
+  db-psql)
+    require_env
+    docker exec -it retriva-postgres psql \
+      -U "$(grep -E '^RETRIVA_PG_ADMIN_USER=' "$ENV_FILE" | cut -d '=' -f 2- || echo retriva_admin)" \
+      -d "$(grep -E '^RETRIVA_PG_DATABASE=' "$ENV_FILE" | cut -d '=' -f 2- || echo retriva)"
+    ;;
+
+  db-logs)
+    require_env
+    if [[ $# -eq 0 ]]; then
+      docker logs retriva-postgres
+    else
+      docker logs "$@"
+    fi
+    ;;
+
   connector-validate)
     require_env
     compose --profile pro run --rm retriva-mediawiki-connector validate --config /app/config/mediawiki.yaml
@@ -339,6 +430,15 @@ Commands:
   connector-shell     Open shell in MediaWiki connector container (alias: pro-shell)
   connector-validate  Run connector validate command (alias: pro-validate)
   connector-sync      Run connector sync command (alias: pro-sync)
+  db-up               Start the PostgreSQL Business Intelligence stack
+                      (postgres + role bootstrap + migrations + pgAdmin; "db" profile)
+  db-down             Stop the PostgreSQL stack (keeps volumes)
+  db-migrate          Apply pending PostgreSQL migrations (controlled step)
+  db-status           Show PostgreSQL migration ledger and pending state
+  db-verify           Verify PostgreSQL RLS/role invariants
+  db-readiness        PostgreSQL readiness report (no credentials)
+  db-psql             Open psql inside retriva-postgres (local trust socket)
+  db-logs             Show PostgreSQL container logs (docker logs args)
   email-shell         Open shell in Email Agent connector container
   email-validate      Run Email Agent connector validate command
   email-run            Start Email Agent connector (SMTP server)

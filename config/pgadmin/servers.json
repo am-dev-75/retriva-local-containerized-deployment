@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Retriva PostgreSQL (internal)",
+      "Group": "Retriva",
+      "Host": "retriva-postgres",
+      "Port": 5432,
+      "MaintenanceDB": "retriva",
+      "Username": "retriva_pgadmin_operator",
+      "SSLMode": "prefer",
+      "Comment": "Retriva Business Intelligence Database. Internal Docker hostname; no credentials are stored in this file - pgAdmin prompts for the retriva_pgadmin_operator password (read-only role)."
+    }
+  }
+}

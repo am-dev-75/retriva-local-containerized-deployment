@@ -17,6 +17,8 @@ volumes:
   messaging_db_data:
   apprise_config:
   messaging_state:
+  retriva_pg_data:
+  retriva_pgadmin_data:
 
 services:
   qdrant:
@@ -712,5 +714,140 @@ services:
     depends_on:
       retriva-gateway:
         condition: service_started
+    networks:
+      - retriva-net
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Business Intelligence Database (Retriva Pro).
+  #
+  # PostgreSQL is the authoritative RELATIONAL store: canonical
+  # organization identity, business facts, commercial roles,
+  # lifecycle, qualification history, exclusions, ERP imports, and
+  # audit.  It does NOT replace Qdrant (embeddings/retrieval) and is
+  # not published to the host: it is reachable only inside the
+  # retriva-net Docker network.
+  #
+  # Gated behind the "db" profile so base and "pro" deployments are
+  # unaffected (each phase is independently deployable and reversible):
+  #   ./scripts/manage.sh db-up
+  # ---------------------------------------------------------------------------
+  retriva-postgres:
+    image: ${RETRIVA_PG_IMAGE:-postgres:16.15-alpine}
+    container_name: retriva-postgres
+    restart: unless-stopped
+    profiles: ["db"]
+    volumes:
+      - retriva_pg_data:/var/lib/postgresql/data
+    environment:
+      TZ: ${TZ:-UTC}
+      POSTGRES_DB: ${RETRIVA_PG_DATABASE:-retriva}
+      POSTGRES_USER: ${RETRIVA_PG_ADMIN_USER:-retriva_admin}
+      # Set exactly ONE of the two in .env (env value or a mounted
+      # secret file).  Real credentials are never committed.
+      POSTGRES_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
+      POSTGRES_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RETRIVA_PG_ADMIN_USER:-retriva_admin} -d ${RETRIVA_PG_DATABASE:-retriva}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - retriva-net
+
+  # One-shot deployment step (cluster-admin connection): creates or
+  # rotates the five managed roles and their database privileges.
+  # Long-running services NEVER use the admin/superuser account.
+  retriva-pg-bootstrap:
+    build:
+      context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
+      dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_PG_TOOLS_BUILD_TARGET:-pro}
+    image: ${RETRIVA_CORE_IMAGE:-retriva-core:local}
+    container_name: retriva-pg-bootstrap
+    restart: "no"
+    profiles: ["db"]
+    command: python -m retriva_crm_assistant.postgres.migrate bootstrap-roles
+    environment:
+      TZ: ${TZ:-UTC}
+      CRM_PG_HOST: retriva-postgres
+      CRM_PG_PORT: "5432"
+      CRM_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      CRM_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      CRM_PG_ADMIN_USER: ${RETRIVA_PG_ADMIN_USER:-retriva_admin}
+      CRM_PG_ADMIN_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
+      CRM_PG_ADMIN_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
+      CRM_PG_MIGRATOR_PASSWORD: ${CRM_PG_MIGRATOR_PASSWORD:-}
+      CRM_PG_MIGRATOR_PASSWORD_FILE: ${CRM_PG_MIGRATOR_PASSWORD_FILE:-}
+      CRM_PG_APPLICATION_PASSWORD: ${CRM_PG_APPLICATION_PASSWORD:-}
+      CRM_PG_APPLICATION_PASSWORD_FILE: ${CRM_PG_APPLICATION_PASSWORD_FILE:-}
+      CRM_PG_IMPORTER_PASSWORD: ${CRM_PG_IMPORTER_PASSWORD:-}
+      CRM_PG_IMPORTER_PASSWORD_FILE: ${CRM_PG_IMPORTER_PASSWORD_FILE:-}
+      CRM_PG_READONLY_PASSWORD: ${CRM_PG_READONLY_PASSWORD:-}
+      CRM_PG_READONLY_PASSWORD_FILE: ${CRM_PG_READONLY_PASSWORD_FILE:-}
+      CRM_PG_PGADMIN_OPERATOR_PASSWORD: ${CRM_PG_PGADMIN_OPERATOR_PASSWORD:-}
+      CRM_PG_PGADMIN_OPERATOR_PASSWORD_FILE: ${CRM_PG_PGADMIN_OPERATOR_PASSWORD_FILE:-}
+    depends_on:
+      retriva-postgres:
+        condition: service_healthy
+    networks:
+      - retriva-net
+
+  # One-shot controlled migration step (migrator role only): applies
+  # the versioned SQL migrations and their ledger.  Application
+  # processes never race to apply migrations.
+  retriva-pg-migrate:
+    build:
+      context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
+      dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_PG_TOOLS_BUILD_TARGET:-pro}
+    image: ${RETRIVA_CORE_IMAGE:-retriva-core:local}
+    container_name: retriva-pg-migrate
+    restart: "no"
+    profiles: ["db"]
+    command: python -m retriva_crm_assistant.postgres.migrate upgrade
+    environment:
+      TZ: ${TZ:-UTC}
+      CRM_PG_HOST: retriva-postgres
+      CRM_PG_PORT: "5432"
+      CRM_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      CRM_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      CRM_PG_MIGRATOR_PASSWORD: ${CRM_PG_MIGRATOR_PASSWORD:-}
+      CRM_PG_MIGRATOR_PASSWORD_FILE: ${CRM_PG_MIGRATOR_PASSWORD_FILE:-}
+    depends_on:
+      retriva-postgres:
+        condition: service_healthy
+      retriva-pg-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - retriva-net
+
+  # pgAdmin for authorized operators (inspect/query/debug).  Binds to
+  # localhost by default; remote access requires an SSH tunnel, VPN,
+  # or an authenticated internal route.  Connect to PostgreSQL via
+  # the internal Docker hostname "retriva-postgres" (port 5432) using
+  # the retriva_pgadmin_operator role.
+  retriva-pgadmin:
+    image: ${RETRIVA_PGADMIN_IMAGE:-dpage/pgadmin4:9.18}
+    container_name: retriva-pgadmin
+    restart: unless-stopped
+    profiles: ["db", "pgadmin"]
+    ports:
+      - "${RETRIVA_PGADMIN_BIND_ADDR:-127.0.0.1}:${RETRIVA_PGADMIN_PORT:-5050}:80"
+    volumes:
+      - retriva_pgadmin_data:/var/lib/pgadmin
+      # Pre-registered internal server definition (no credentials).
+      - ./config/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    environment:
+      TZ: ${TZ:-UTC}
+      PGADMIN_DEFAULT_EMAIL: ${RETRIVA_PGADMIN_EMAIL:-}
+      # Set exactly ONE of the two in .env.
+      PGADMIN_DEFAULT_PASSWORD: ${RETRIVA_PGADMIN_PASSWORD:-}
+      PGADMIN_DEFAULT_PASSWORD_FILE: ${RETRIVA_PGADMIN_PASSWORD_FILE:-}
+      PGADMIN_DISABLE_POSTFIX: "1"
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "True"
+    depends_on:
+      retriva-postgres:
+        condition: service_healthy
     networks:
       - retriva-net

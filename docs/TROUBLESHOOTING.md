@@ -54,6 +54,15 @@ grep OPENAI_PROVIDER_API_KEY .env
 TIKA_IMAGE=apache/tika:latest
 ```
 
+## PostgreSQL Business Intelligence stack
+
+`db-up` fails listing missing variables, migrations do not apply, or
+pgAdmin cannot connect: see
+[postgres-business-intelligence.md](postgres-business-intelligence.md)
+(credential setup, role bootstrap, migration ledger and status,
+readiness report, pgAdmin connection via the internal hostname
+`retriva-postgres`).
+
 ## Clean reset
 
 ```bash
@@ -61,3 +70,7 @@ TIKA_IMAGE=apache/tika:latest
 ./scripts/manage.sh build
 ./scripts/manage.sh up
 ```
+
+Note: `purge` also removes the PostgreSQL volumes
+(`retriva_pg_data`, `retriva_pgadmin_data`) — take a `pg_dump` first
+if the business data must survive a reset.
