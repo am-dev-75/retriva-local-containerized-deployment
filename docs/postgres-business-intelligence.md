@@ -103,14 +103,26 @@ plus a matching `.down.sql`). The runner:
 
 | Role | Privileges |
 |---|---|
-| `retriva_migrator` | owns all schemas; the only role that applies schema changes |
-| `retriva_application` | SELECT/INSERT/UPDATE on business/qualification/research/jobs/imports; no DELETE on business history; **no DDL, owns nothing** |
+| `retriva_migrator` | owns all schemas (business, qualification, research, imports, jobs, audit, campaigns); the only role that applies schema changes |
+| `retriva_application` | SELECT/INSERT/UPDATE on business/qualification/research/jobs/imports/campaigns; no DELETE on business history; `campaigns.campaign_company_events` is INSERT-only (append-oriented); **no DDL, owns nothing** |
 | `retriva_importer` | writes only `imports.*` (staging + commit paths); read-only elsewhere |
-| `retriva_readonly` | SELECT only |
-| `retriva_pgadmin_operator` | SELECT only (explicit pgAdmin operator posture) |
+| `retriva_readonly` | SELECT only (including the campaigns schema) |
+| `retriva_pgadmin_operator` | SELECT only (explicit pgAdmin operator posture; campaigns schema included — see `campaign-inspection-queries.md` in the CRM Assistant repo) |
 
 No production service uses the PostgreSQL superuser; the cluster admin
 (`retriva_admin`) is used only by the one-shot bootstrap step.
+
+### Campaign tracking (V006)
+
+Migration V006 adds the `campaigns` schema: campaign registry,
+campaign relationships, company-level campaign participation with an
+append-oriented event history (the addressed invariant: an
+organization is addressed iff a non-revoked `ADDRESS_CONFIRMED` event
+exists), versioned selection policies and explainable audience
+selection runs. Row-Level Security covers every campaigns table with
+the same fail-closed `app.current_tenant` mechanism; the pgAdmin
+operator inspects campaigns through the tenant-scoped read-only
+queries in the CRM extension's `docs/campaign-inspection-queries.md`.
 
 ### Tenant isolation
 
