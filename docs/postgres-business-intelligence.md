@@ -124,6 +124,28 @@ the same fail-closed `app.current_tenant` mechanism; the pgAdmin
 operator inspects campaigns through the tenant-scoped read-only
 queries in the CRM extension's `docs/campaign-inspection-queries.md`.
 
+### ERP customer identity and addresses (V007)
+
+Migration V007 makes the database fully ready for the hierarchical
+Sage X3 customer export (`F1790281894348.txt`-style semicolon TXT):
+`SOURCE_CONFIRMED` identifier verification (ERP customer codes are
+source-confirmed; ERP-provided VAT/names stay `UNVERIFIED`), the
+controlled `business.source_systems` registry (stable `SAGE_X3`
+namespace; single-dossier assumption documented in ADR-021),
+`business.organization_addresses` (dated, hash-deduplicated address
+history), `business.organization_contact_points` (company-level
+only) and `business.organization_identifier_lineage` (import batch /
+file / B-row lineage per observation). Identifier lookup is
+merge-safe (chains through `MERGED` shells to the surviving
+canonical organization, cycles fail closed). Contact (C) and banking
+(R) records from the export are never persisted — at most their row
+numbers and ignored reasons are staged; the uploaded file is not
+retained on disk. Tenant configuration:
+`CRM_ERP_SOURCE_SYSTEM_CODE`, `CRM_ERP_INTERNAL_CUSTOMER_CODES`,
+`CRM_ERP_INTERNAL_VAT_VALUES`, `CRM_ERP_TEST_CUSTOMER_CODES`. The
+pgAdmin inspection queries live in the CRM extension's
+`docs/erp-inspection-queries.md`.
+
 ### Tenant isolation
 
 Every tenant-owned table carries `tenant_id` and enforces PostgreSQL
