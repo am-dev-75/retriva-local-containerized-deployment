@@ -149,6 +149,14 @@ services:
       VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       RETRIEVAL_RERANK_BASE_URL: ${RETRIEVAL_RERANK_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      # Rerank provider selection (global, one setting for every KB/user):
+      # "" or "openrouter" (default, Cohere-compatible /rerank) or "bedrock"
+      # (Amazon Bedrock Rerank). With "bedrock", RETRIEVAL_RERANK_API_KEY is
+      # ignored and credentials come from the standard AWS chain
+      # (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN, shared
+      # config, or the workload IAM role).
+      RETRIEVAL_RERANK_PROVIDER: ${RETRIEVAL_RERANK_PROVIDER:-}
+      RETRIEVAL_RERANK_AWS_REGION: ${RETRIEVAL_RERANK_AWS_REGION:-}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
@@ -241,6 +249,14 @@ services:
       VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       RETRIEVAL_RERANK_BASE_URL: ${RETRIEVAL_RERANK_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      # Rerank provider selection (global, one setting for every KB/user):
+      # "" or "openrouter" (default, Cohere-compatible /rerank) or "bedrock"
+      # (Amazon Bedrock Rerank). With "bedrock", RETRIEVAL_RERANK_API_KEY is
+      # ignored and credentials come from the standard AWS chain
+      # (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN, shared
+      # config, or the workload IAM role).
+      RETRIEVAL_RERANK_PROVIDER: ${RETRIEVAL_RERANK_PROVIDER:-}
+      RETRIEVAL_RERANK_AWS_REGION: ${RETRIEVAL_RERANK_AWS_REGION:-}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
@@ -322,6 +338,14 @@ services:
       VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       RETRIEVAL_RERANK_BASE_URL: ${RETRIEVAL_RERANK_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      # Rerank provider selection (global, one setting for every KB/user):
+      # "" or "openrouter" (default, Cohere-compatible /rerank) or "bedrock"
+      # (Amazon Bedrock Rerank). With "bedrock", RETRIEVAL_RERANK_API_KEY is
+      # ignored and credentials come from the standard AWS chain
+      # (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN, shared
+      # config, or the workload IAM role).
+      RETRIEVAL_RERANK_PROVIDER: ${RETRIEVAL_RERANK_PROVIDER:-}
+      RETRIEVAL_RERANK_AWS_REGION: ${RETRIEVAL_RERANK_AWS_REGION:-}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
