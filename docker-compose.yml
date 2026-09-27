@@ -419,6 +419,9 @@ services:
       TZ: ${TZ:-UTC}
       RETRIVA_CORE_INGESTION_URL: ${RETRIVA_CORE_INGESTION_URL:-http://retriva-ingestion:8000}
       RETRIVA_CORE_CHAT_URL: ${RETRIVA_CORE_CHAT_URL:-http://retriva-core:8001}
+      # Browser-reachable origin for clickable review/report links the
+      # chat agent emits (mirrors the WebUI's VITE gateway base URL).
+      GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:-http://localhost:${GATEWAY_PORT:-8002}}
       DYNAMIC_INGESTION_ENABLED: ${DYNAMIC_INGESTION_ENABLED:-true}
       GATEWAY_INTERNAL_SERVICE_TOKEN: ${GATEWAY_INTERNAL_SERVICE_TOKEN:-local-dev-service-token}
       LOG_LEVEL: ${GATEWAY_LOG_LEVEL:-INFO}
