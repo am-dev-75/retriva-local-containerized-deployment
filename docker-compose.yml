@@ -437,6 +437,13 @@ services:
       RETRIVA_ENTRA_ROLE_CLAIM: ${RETRIVA_ENTRA_ROLE_CLAIM:-roles}
       RETRIVA_ENTRA_GROUPS_CLAIM: ${RETRIVA_ENTRA_GROUPS_CLAIM:-groups}
       RETRIVA_ENTRA_JWKS_REFRESH_SECONDS: ${RETRIVA_ENTRA_JWKS_REFRESH_SECONDS:-3600}
+      # Trusted machine-caller principal presented to the CRM extension
+      # when auth is disabled (must match CRM_EXECUTOR_SERVICE_PRINCIPAL;
+      # empty = legacy anonymous behavior).
+      RETRIVA_SERVICE_PRINCIPAL: ${RETRIVA_SERVICE_PRINCIPAL:-${CRM_EXECUTOR_SERVICE_PRINCIPAL:-}}
+      # Set false on deployments without the CRM PostgreSQL extension
+      # (removes the 19 ACP/enrichment tool schemas from chat).
+      AGENT_ACP_TOOLS_ENABLED: ${AGENT_ACP_TOOLS_ENABLED:-true}
     ports:
       - "${GATEWAY_PORT:-8002}:8002"
     volumes:
