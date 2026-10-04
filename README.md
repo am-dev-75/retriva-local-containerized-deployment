@@ -121,11 +121,15 @@ multi-channel notifications. It is a Retriva Pro extension licensed under the
 Retriva Pro Proprietary Commercial License Agreement (see
 `../retriva-messaging-extension/LICENSE.retriva-pro`).
 
-When enabled, `up-pro` starts three additional services:
+When enabled, `up-pro` starts the Messaging services on the **shared
+Retriva PostgreSQL instance** (`retriva-postgres`) and the common
+`retriva` database, in the Pro-owned `messaging` schema (Spec 024;
+ADR-029 — the retired dedicated database service is gone):
 
 | Service | Container | Description |
 |---|---|---|
-| `retriva-messaging-db` | `retriva-messaging-db` | PostgreSQL (dedicated database) |
+| `retriva-pg-messaging-bootstrap` | `retriva-pg-messaging-bootstrap` | one-shot: `retriva_messaging` runtime role + `messaging` schema grants |
+| `retriva-pg-messaging-migrate` | `retriva-pg-messaging-migrate` | one-shot: Alembic stream into the `messaging` schema (migrator identity) |
 | `apprise-api` | `retriva-apprise-api` | Apprise API server (delivery adapter) |
 | `retriva-messaging` | `retriva-messaging` | Messaging API + worker |
 

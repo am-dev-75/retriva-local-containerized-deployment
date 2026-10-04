@@ -14,7 +14,6 @@ volumes:
   email_agent_connector_state:
   whisper_models:
   redis_data:
-  messaging_db_data:
   apprise_config:
   messaging_state:
   retriva_pg_data:
@@ -236,6 +235,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Mandatory shared PostgreSQL: Core services start only after
+      # successful Core migrations (Spec 024; ADR-029).
+      retriva-pg-migrate:
+        condition: service_completed_successfully
     networks:
       - retriva-net
     healthcheck:
@@ -336,6 +339,10 @@ services:
         condition: service_healthy
       tika:
         condition: service_healthy
+      # Mandatory shared PostgreSQL: Core services start only after
+      # successful Core migrations.
+      retriva-pg-migrate:
+        condition: service_completed_successfully
     networks:
       - retriva-net
     healthcheck:
@@ -426,6 +433,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Mandatory shared PostgreSQL: Core services start only after
+      # successful Core migrations.
+      retriva-pg-migrate:
+        condition: service_completed_successfully
     networks:
       - retriva-net
     healthcheck:
@@ -493,6 +504,10 @@ services:
     depends_on:
       retriva-core:
         condition: service_started
+      # Mandatory shared PostgreSQL: Core services start only after
+      # successful Core migrations.
+      retriva-pg-migrate:
+        condition: service_completed_successfully
     networks:
       - retriva-net
     healthcheck:
@@ -671,33 +686,13 @@ services:
   # Retriva Messaging is the system of record; Apprise API is a replaceable
   # delivery adapter.  See ../retriva-messaging-extension/README.md.
   #
-  # Three services are started:
-  #   retriva-messaging-db  — PostgreSQL (dedicated database)
-  #   apprise-api           — Apprise API server (delivery adapter)
-  #   retriva-messaging     — Messaging API + worker
-  #
-  # All three are tagged with the "pro" profile and are only started by
-  # `./scripts/manage.sh up-pro`.  The base `up` command is unaffected.
-  retriva-messaging-db:
-    image: ${MESSAGING_DB_IMAGE:-postgres:16-alpine}
-    container_name: retriva-messaging-db
-    restart: unless-stopped
-    profiles: ["pro", "messaging"]
-    environment:
-      TZ: ${TZ:-UTC}
-      POSTGRES_DB: ${MESSAGING_DB_NAME:-retriva_messaging}
-      POSTGRES_USER: ${MESSAGING_DB_USER:-messaging}
-      POSTGRES_PASSWORD: ${MESSAGING_DB_PASSWORD:-messaging}
-    volumes:
-      - messaging_db_data:/var/lib/postgresql/data
-    networks:
-      - retriva-net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${MESSAGING_DB_USER:-messaging} -d ${MESSAGING_DB_NAME:-retriva_messaging}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+  # NOTE (Spec 024; ADR-029): the retired dedicated Messaging
+  # PostgreSQL service (`retriva-messaging-db`) and the
+  # `retriva_messaging` database target were removed.  Messaging uses
+  # the shared `retriva-postgres` service and the common `retriva`
+  # database with the Pro-owned `messaging` schema; its role and
+  # schema are provisioned by `retriva-pg-messaging-bootstrap` and its
+  # Alembic stream by `retriva-pg-messaging-migrate`.
 
   apprise-api:
     image: ${APPRISE_API_IMAGE:-caronc/apprise:latest}
@@ -739,7 +734,14 @@ services:
       RETRIVA_MESSAGING_ENABLED_CHANNELS: ${RETRIVA_MESSAGING_ENABLED_CHANNELS:-email}
       RETRIVA_MESSAGING_DEFAULT_CHANNELS: ${RETRIVA_MESSAGING_DEFAULT_CHANNELS:-email}
       RETRIVA_MESSAGING_ALLOW_ARBITRARY_DESTINATIONS: ${RETRIVA_MESSAGING_ALLOW_ARBITRARY_DESTINATIONS:-false}
-      RETRIVA_MESSAGING_DATABASE_URL: postgresql+psycopg2://${MESSAGING_DB_USER:-messaging}:${MESSAGING_DB_PASSWORD:-messaging}@retriva-messaging-db:5432/${MESSAGING_DB_NAME:-retriva_messaging}
+      # Shared Retriva PostgreSQL service, `retriva` database,
+      # Pro-owned `messaging` schema.  The runtime identity is the
+      # dedicated `retriva_messaging` role (never the migrator or the
+      # admin); migrations run through `retriva-pg-messaging-migrate`.
+      # (manage.sh `messaging-*` commands fail fast when the runtime
+      # credential is unset; the compose interpolation default stays
+      # empty so non-messaging deployments validate cleanly.)
+      RETRIVA_MESSAGING_DATABASE_URL: postgresql+psycopg2://${RETRIVA_MESSAGING_DB_USER:-retriva_messaging}:${RETRIVA_MESSAGING_DB_PASSWORD:-}@retriva-postgres:5432/${RETRIVA_PG_DATABASE:-retriva}
       RETRIVA_MESSAGING_APPRISE_API_URL: http://apprise-api:8000
       RETRIVA_MESSAGING_APPRISE_EMAIL_TAG: ${RETRIVA_MESSAGING_APPRISE_EMAIL_TAG:-retriva-email}
       RETRIVA_MESSAGING_EMAIL_FROM_ADDRESS: ${RETRIVA_MESSAGING_EMAIL_FROM_ADDRESS:-retriva@localhost}
@@ -753,8 +755,11 @@ services:
       - ./config/messaging.yaml:/app/config/messaging.yaml:ro
       - messaging_state:/app/state
     depends_on:
-      retriva-messaging-db:
-        condition: service_healthy
+      # Shared-PostgreSQL lifecycle: the Messaging service starts only
+      # after its own migration stream succeeded (Core migrations
+      # first, then the Messaging one-shot), never before.
+      retriva-pg-messaging-migrate:
+        condition: service_completed_successfully
       apprise-api:
         condition: service_healthy
     networks:
@@ -816,11 +821,14 @@ services:
   # unaffected (each phase is independently deployable and reversible):
   #   ./scripts/manage.sh db-up
   # ---------------------------------------------------------------------------
+  # Mandatory shared PostgreSQL (Spec 024; ADR-029): one instance,
+  # one `retriva` database, module-owned schemas.  Never profile-gated
+  # anymore — Core-only deployments start it too.  The volume holds
+  # real development data; it is never recreated by the lifecycle.
   retriva-postgres:
     image: ${RETRIVA_PG_IMAGE:-postgres:16.15-alpine}
     container_name: retriva-postgres
     restart: unless-stopped
-    profiles: ["db"]
     volumes:
       - retriva_pg_data:/var/lib/postgresql/data
     environment:
@@ -832,6 +840,8 @@ services:
       POSTGRES_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
       POSTGRES_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
     healthcheck:
+      # No credentials in the health output: user and database names
+      # only.
       test: ["CMD-SHELL", "pg_isready -U ${RETRIVA_PG_ADMIN_USER:-retriva_admin} -d ${RETRIVA_PG_DATABASE:-retriva}"]
       interval: 10s
       timeout: 5s
@@ -840,30 +850,100 @@ services:
     networks:
       - retriva-net
 
-  # One-shot deployment step (cluster-admin connection): creates or
-  # rotates the five managed roles and their database privileges.
-  # Long-running services NEVER use the admin/superuser account.
+  # One-shot Core platform bootstrap (cluster-admin connection):
+  # provisions the platform roles (migrator, Core runtime) and
+  # restricts database CREATE to the migrator.  Long-running services
+  # NEVER use the admin/superuser account.  Runs the Core-only `base`
+  # image (no Pro package, no Pro credential).
   retriva-pg-bootstrap:
+    build:
+      # Repo-relative context: the Core-only `base` stage copies
+      # repo-relative paths (src/, requirements.txt), unlike the
+      # `pro` stage which copies workspace-parent-relative paths.
+      # The platform one-shots must therefore always build from the
+      # core repo context, even in Pro deployments that override
+      # RETRIVA_CORE_CONTEXT to the workspace parent.
+      context: ${RETRIVA_PG_TOOLS_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
+      dockerfile: ${RETRIVA_PG_TOOLS_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_PG_BUILD_TARGET:-base}
+    image: ${RETRIVA_CORE_BASE_IMAGE:-retriva-core-base:local}
+    container_name: retriva-pg-bootstrap
+    restart: "no"
+    command: python -m retriva.infrastructure.postgres.migrate bootstrap
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_PG_HOST: retriva-postgres
+      RETRIVA_PG_PORT: "5432"
+      RETRIVA_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      RETRIVA_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      RETRIVA_PG_ADMIN_USER: ${RETRIVA_PG_ADMIN_USER:-retriva_admin}
+      RETRIVA_PG_ADMIN_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
+      RETRIVA_PG_ADMIN_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
+      RETRIVA_PG_MIGRATOR_PASSWORD: ${RETRIVA_PG_MIGRATOR_PASSWORD:-}
+      RETRIVA_PG_MIGRATOR_PASSWORD_FILE: ${RETRIVA_PG_MIGRATOR_PASSWORD_FILE:-}
+      RETRIVA_PG_CORE_PASSWORD: ${RETRIVA_PG_CORE_PASSWORD:-}
+      RETRIVA_PG_CORE_PASSWORD_FILE: ${RETRIVA_PG_CORE_PASSWORD_FILE:-}
+    depends_on:
+      retriva-postgres:
+        condition: service_healthy
+    networks:
+      - retriva-net
+
+  # One-shot controlled Core migration step (migrator role only):
+  # applies the `core.platform` stream (Core schema + ledger).  Core
+  # services start only after this succeeds.  Core-only by design: no
+  # extension provider is registered here (the extension one-shots
+  # apply their own streams after this one).  Runs the Core-only
+  # `base` image.
+  retriva-pg-migrate:
+    build:
+      # Repo-relative context (see retriva-pg-bootstrap).
+      context: ${RETRIVA_PG_TOOLS_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
+      dockerfile: ${RETRIVA_PG_TOOLS_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_PG_BUILD_TARGET:-base}
+    image: ${RETRIVA_CORE_BASE_IMAGE:-retriva-core-base:local}
+    container_name: retriva-pg-migrate
+    restart: "no"
+    command: python -m retriva.infrastructure.postgres.migrate upgrade
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_PG_HOST: retriva-postgres
+      RETRIVA_PG_PORT: "5432"
+      RETRIVA_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      RETRIVA_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      RETRIVA_PG_MIGRATOR_PASSWORD: ${RETRIVA_PG_MIGRATOR_PASSWORD:-}
+      RETRIVA_PG_MIGRATOR_PASSWORD_FILE: ${RETRIVA_PG_MIGRATOR_PASSWORD_FILE:-}
+    depends_on:
+      retriva-postgres:
+        condition: service_healthy
+      retriva-pg-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - retriva-net
+
+  # One-shot Pro CRM extension bootstrap (profiles: pro/db): the four
+  # CRM extension roles (application, importer, readonly, pgAdmin
+  # operator).  The platform roles come from the Core bootstrap; this
+  # step runs after it and reuses the Core generic provisioning.
+  retriva-pg-crm-bootstrap:
     build:
       context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
-      target: ${RETRIVA_PG_TOOLS_BUILD_TARGET:-pro}
+      target: ${RETRIVA_PG_CRM_BUILD_TARGET:-pro}
     image: ${RETRIVA_CORE_IMAGE:-retriva-core:local}
-    container_name: retriva-pg-bootstrap
+    container_name: retriva-pg-crm-bootstrap
     restart: "no"
-    profiles: ["db"]
+    profiles: ["pro", "db"]
     command: python -m retriva_crm_assistant.postgres.migrate bootstrap-roles
     environment:
       TZ: ${TZ:-UTC}
-      CRM_PG_HOST: retriva-postgres
-      CRM_PG_PORT: "5432"
-      CRM_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
-      CRM_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
-      CRM_PG_ADMIN_USER: ${RETRIVA_PG_ADMIN_USER:-retriva_admin}
-      CRM_PG_ADMIN_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
-      CRM_PG_ADMIN_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
-      CRM_PG_MIGRATOR_PASSWORD: ${CRM_PG_MIGRATOR_PASSWORD:-}
-      CRM_PG_MIGRATOR_PASSWORD_FILE: ${CRM_PG_MIGRATOR_PASSWORD_FILE:-}
+      RETRIVA_PG_HOST: retriva-postgres
+      RETRIVA_PG_PORT: "5432"
+      RETRIVA_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      RETRIVA_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      RETRIVA_PG_ADMIN_USER: ${RETRIVA_PG_ADMIN_USER:-retriva_admin}
+      RETRIVA_PG_ADMIN_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
+      RETRIVA_PG_ADMIN_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
       CRM_PG_APPLICATION_PASSWORD: ${CRM_PG_APPLICATION_PASSWORD:-}
       CRM_PG_APPLICATION_PASSWORD_FILE: ${CRM_PG_APPLICATION_PASSWORD_FILE:-}
       CRM_PG_IMPORTER_PASSWORD: ${CRM_PG_IMPORTER_PASSWORD:-}
@@ -873,36 +953,95 @@ services:
       CRM_PGADMIN_UI_OPERATOR_PASSWORD: ${CRM_PGADMIN_UI_OPERATOR_PASSWORD:-}
       CRM_PGADMIN_UI_OPERATOR_PASSWORD_FILE: ${CRM_PGADMIN_UI_OPERATOR_PASSWORD_FILE:-}
     depends_on:
-      retriva-postgres:
-        condition: service_healthy
+      retriva-pg-bootstrap:
+        condition: service_completed_successfully
     networks:
       - retriva-net
 
-  # One-shot controlled migration step (migrator role only): applies
-  # the versioned SQL migrations and their ledger.  Application
-  # processes never race to apply migrations.
-  retriva-pg-migrate:
+  # One-shot controlled Pro CRM migration step (profiles: pro/db):
+  # applies the `pro.crm` stream through the provider contract
+  # (adopting the retired `audit.schema_migrations` history when
+  # present).  Depends on the Core migrations; no Core service
+  # depends on it.
+  retriva-pg-crm-migrate:
     build:
       context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
-      target: ${RETRIVA_PG_TOOLS_BUILD_TARGET:-pro}
+      target: ${RETRIVA_PG_CRM_BUILD_TARGET:-pro}
     image: ${RETRIVA_CORE_IMAGE:-retriva-core:local}
-    container_name: retriva-pg-migrate
+    container_name: retriva-pg-crm-migrate
     restart: "no"
-    profiles: ["db"]
+    profiles: ["pro", "db"]
     command: python -m retriva_crm_assistant.postgres.migrate upgrade
     environment:
       TZ: ${TZ:-UTC}
-      CRM_PG_HOST: retriva-postgres
-      CRM_PG_PORT: "5432"
-      CRM_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
-      CRM_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
-      CRM_PG_MIGRATOR_PASSWORD: ${CRM_PG_MIGRATOR_PASSWORD:-}
-      CRM_PG_MIGRATOR_PASSWORD_FILE: ${CRM_PG_MIGRATOR_PASSWORD_FILE:-}
+      RETRIVA_PG_HOST: retriva-postgres
+      RETRIVA_PG_PORT: "5432"
+      RETRIVA_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      RETRIVA_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      # The migration step runs ONLY with the migrator credential
+      # (extension role passwords never enter this container).
+      RETRIVA_PG_MIGRATOR_PASSWORD: ${RETRIVA_PG_MIGRATOR_PASSWORD:-}
+      RETRIVA_PG_MIGRATOR_PASSWORD_FILE: ${RETRIVA_PG_MIGRATOR_PASSWORD_FILE:-}
     depends_on:
-      retriva-postgres:
-        condition: service_healthy
+      retriva-pg-migrate:
+        condition: service_completed_successfully
+      retriva-pg-crm-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - retriva-net
+
+  # One-shot Messaging bootstrap (profiles: pro/messaging): the
+  # `retriva_messaging` runtime role and the Pro-owned `messaging`
+  # schema grants on the shared `retriva` database.
+  retriva-pg-messaging-bootstrap:
+    build:
+      context: ${RETRIVA_MESSAGING_DIR:-../retriva-messaging-extension}
+      dockerfile: ${RETRIVA_MESSAGING_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_MESSAGING_IMAGE:-retriva-messaging:local}
+    container_name: retriva-pg-messaging-bootstrap
+    restart: "no"
+    profiles: ["pro", "messaging"]
+    command: python scripts/bootstrap_postgres.py
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_PG_HOST: retriva-postgres
+      RETRIVA_PG_PORT: "5432"
+      RETRIVA_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      RETRIVA_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      RETRIVA_PG_ADMIN_USER: ${RETRIVA_PG_ADMIN_USER:-retriva_admin}
+      RETRIVA_PG_ADMIN_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
+      RETRIVA_PG_ADMIN_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
+      RETRIVA_PG_MIGRATOR_USER: ${RETRIVA_PG_MIGRATOR_USER:-retriva_migrator}
+      RETRIVA_MESSAGING_DB_USER: ${RETRIVA_MESSAGING_DB_USER:-retriva_messaging}
+      RETRIVA_MESSAGING_DB_PASSWORD: ${RETRIVA_MESSAGING_DB_PASSWORD:-}
+      RETRIVA_MESSAGING_DB_PASSWORD_FILE: ${RETRIVA_MESSAGING_DB_PASSWORD_FILE:-}
+    depends_on:
       retriva-pg-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - retriva-net
+
+  # One-shot Messaging migration step (profiles: pro/messaging):
+  # applies Messaging's Alembic stream to the shared `retriva`
+  # database's `messaging` schema, as the migrator identity (the
+  # runtime role cannot run schema DDL).
+  retriva-pg-messaging-migrate:
+    build:
+      context: ${RETRIVA_MESSAGING_DIR:-../retriva-messaging-extension}
+      dockerfile: ${RETRIVA_MESSAGING_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_MESSAGING_IMAGE:-retriva-messaging:local}
+    container_name: retriva-pg-messaging-migrate
+    restart: "no"
+    profiles: ["pro", "messaging"]
+    command: migrate
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_MESSAGING_DATABASE_URL: postgresql+psycopg2://${RETRIVA_PG_MIGRATOR_USER:-retriva_migrator}:${RETRIVA_PG_MIGRATOR_PASSWORD:-}@retriva-postgres:5432/${RETRIVA_PG_DATABASE:-retriva}
+    depends_on:
+      retriva-pg-migrate:
+        condition: service_completed_successfully
+      retriva-pg-messaging-bootstrap:
         condition: service_completed_successfully
     networks:
       - retriva-net
