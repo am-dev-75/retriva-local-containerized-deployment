@@ -245,6 +245,37 @@ Example, start all Pro services except the MediaWiki connector:
 ./scripts/manage.sh purge
 ```
 
+## Durable job operations (operator CLI)
+
+Ingestion jobs (v2 documents, MediaWiki exports, uploads) run on the
+durable job lifecycle: PostgreSQL is the authoritative logical job
+store; Celery/Redis is only the transport. History survives broker
+loss, and interrupted/ambiguous dispatches are resolved by the
+operator reconciliation CLI — not by application endpoints. There is
+intentionally NO public retry route on the job surface: retries are an
+operator action.
+
+```bash
+# Classify and resolve stuck/ambiguous jobs (dry-run by default):
+./scripts/manage.sh jobs-reconcile --tenant default            # report only
+./scripts/manage.sh jobs-reconcile --all-tenants --apply       # perform
+
+# Retention purge of expired terminal jobs (dry-run by default):
+./scripts/manage.sh jobs-cleanup --tenant default
+./scripts/manage.sh jobs-cleanup --all-tenants --apply
+```
+
+Exit codes: `0` clean / `3` actions applied / `4` manual-review jobs
+pending operator resolution / `1` failure. Jobs land in
+`manual_review` only through the bounded anomaly classification
+(ADR-030); they are resolved by a database administrator with the
+`python -m retriva.jobs.retry` CLI, never from the public API.
+
+Configuration lives in `.env` (`RETRIVA_JOBS_*`, see
+`.env.example`); `RETRIVA_JOBS_DEFAULT_TENANT` is MANDATORY — the
+ingestion API refuses to start without it, and ordinary request input
+never selects a tenant.
+
 ## Overriding Settings Globally
 
 You can override any application setting (such as `RETRIVA_DEFAULT_COLLECTION`, port numbers, or API keys) by editing your `.env` file. 

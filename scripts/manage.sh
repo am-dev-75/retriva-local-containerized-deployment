@@ -370,6 +370,27 @@ case "$COMMAND" in
     fi
     ;;
 
+  jobs-reconcile)
+    # Operator CLI: durable-jobs reconciliation (R1-R9).  Dry-run by
+    # default; pass --apply to perform the classified actions.  Scope:
+    # --tenant <id> or --all-tenants (exit codes: 0 clean, 3 applied,
+    # 4 manual-review pending, 1 failure).  Runs in the worker image
+    # with the Core runtime identity (PostgreSQL is the authoritative
+    # job store; Spec 025 / ADR-030).
+    _require_pg_env
+    compose run --rm --no-deps retriva-worker \
+      python -m retriva.jobs.reconcile "$@"
+    ;;
+
+  jobs-cleanup)
+    # Operator CLI: retention purge of expired terminal jobs
+    # (succeeded 30d / failed+cancelled 90d; manual_review is never
+    # removed).  Dry-run by default; pass --apply to purge.
+    _require_pg_env
+    compose run --rm --no-deps retriva-worker \
+      python -m retriva.jobs.cleanup "$@"
+    ;;
+
   db-messaging-bootstrap)
     _require_pg_env
     _require_messaging_env
@@ -496,6 +517,14 @@ Commands:
   db-status           Show the migration ledger and pending state
   db-verify           Verify framework + CRM RLS/role invariants
   db-readiness        PostgreSQL readiness report (no credentials)
+  jobs-reconcile [args]
+                      Durable-jobs reconciliation (R1-R9); dry-run by
+                      default, --apply to perform; scope --tenant <id>
+                      or --all-tenants; exit 0 clean / 3 applied /
+                      4 manual-review / 1 failure
+  jobs-cleanup [args] Retention purge of expired terminal jobs
+                      (dry-run by default, --apply to purge);
+                      manual_review jobs are never removed
   db-psql             Open psql inside retriva-postgres (local trust socket)
   db-logs             Show PostgreSQL container logs (docker logs args)
   db-messaging-bootstrap
