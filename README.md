@@ -299,6 +299,52 @@ MEDIAWIKI_CONNECTOR_TARGET_KB_ID=my_custom_kb
 ```
 Note: Secrets (like `MEDIAWIKI_BOT_PASSWORD`) don't require this prefix and use their standard names.
 
+### Local-development MediaWiki (`mediawiki-local`)
+
+The MediaWiki connector expects a source wiki. For self-contained local
+development this deployment provides a private, persistent MediaWiki service,
+`mediawiki-local`, that matches the connector's default endpoint
+`http://mediawiki-local:80/api.php`:
+
+- `mediawiki-local` — MediaWiki 1.43 LTS (`MEDIAWIKI_LOCAL_IMAGE`, default
+  `mediawiki:1.43.11`), reachable only on the internal `retriva-local-net`
+  network and **not published on any host port**.
+- `mediawiki-local-db` — MariaDB 11.4 LTS (`MEDIAWIKI_LOCAL_DB_IMAGE`, default
+  `mariadb:11.4`), with an isolated data volume. It is **not** the Retriva
+  centralized PostgreSQL store.
+
+Both services belong to the `pro` and `connectors` profiles, so
+`./scripts/manage.sh up-pro` starts them together with the connector, and the
+connector waits for `mediawiki-local` to become healthy before starting. To
+point the connector at an external wiki instead, set
+`MEDIAWIKI_CONNECTOR_API_URL` to that wiki's `api.php` and do not start the
+local wiki.
+
+Initialization is automatic on first start: the container installs MediaWiki
+into the persistent `mediawiki_local_config` volume using the synthetic
+credentials from `MEDIAWIKI_LOCAL_*` in `.env` (gitignored), then symlinks
+`LocalSettings.php` into the web root. No secret is written to the repository.
+The database is stored in the persistent `mediawiki_local_db_data` volume.
+Anonymous editing is disabled by default.
+
+To create a synthetic validation page (after the wiki is healthy), use the CLI
+installer's maintenance script, which does not require exposing credentials:
+
+```bash
+docker exec mediawiki-local php maintenance/edit.php -s "synthetic validation" \
+  "Retriva Local Connector Test Page" < page.wiki
+```
+
+Cleanup and rollback (removes only the local wiki dependency; preserves the
+connector state volume `mediawiki_connector_state`):
+
+```bash
+docker compose -p cust_0007 --env-file .env -f docker-compose.yml \
+  --profile connectors rm -sf mediawiki-local mediawiki-local-db
+# Persistent volumes are preserved; delete explicitly only if intentional:
+#   docker volume rm cust_0007_mediawiki_local_config cust_0007_mediawiki_local_db_data
+```
+
 ### Multiple MediaWiki Instances
 
 Retriva Pro supports syncing multiple MediaWiki websites simultaneously. Each wiki gets its own connector container with its own configuration, state, and tag. Chunks from different wikis are distinguished by the `tag` field in their metadata, allowing you to filter search results by source wiki.

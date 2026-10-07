@@ -11,6 +11,8 @@ volumes:
   retriva_gateway_storage:
   mediawiki_connector_state:
   mediawiki_connector_2_state:
+  mediawiki_local_config:
+  mediawiki_local_db_data:
   email_agent_connector_state:
   whisper_models:
   redis_data:
@@ -586,6 +588,8 @@ services:
     depends_on:
       retriva-gateway:
         condition: service_healthy
+      mediawiki-local:
+        condition: service_healthy
     networks:
       - retriva-net
     extra_hosts:
@@ -630,6 +634,88 @@ services:
   #   extra_hosts:
   #     - "host.docker.internal:host-gateway"
   #   command: ${MEDIAWIKI_CONNECTOR_2_COMMAND:-daemon}
+
+  # --- Local-development MediaWiki dependency for the MediaWiki connector ---
+  # A minimal, private, persistent MediaWiki used only for local-development
+  # connector validation.  It is not published on any host port and is reachable
+  # only from the `retriva-local-net` network as `mediawiki-local`, matching the
+  # existing `MEDIAWIKI_CONNECTOR_API_URL` default
+  # (`http://mediawiki-local:80/api.php`).  Its database is isolated from the
+  # Retriva centralized PostgreSQL store.
+  mediawiki-local-db:
+    image: ${MEDIAWIKI_LOCAL_DB_IMAGE:-mariadb:11.4}
+    container_name: mediawiki-local-db
+    restart: unless-stopped
+    profiles: ["pro", "connectors"]
+    environment:
+      TZ: ${TZ:-UTC}
+      MARIADB_DATABASE: ${MEDIAWIKI_LOCAL_DB_NAME:-mediawiki_local}
+      MARIADB_USER: ${MEDIAWIKI_LOCAL_DB_USER:-mediawiki}
+      MARIADB_PASSWORD: ${MEDIAWIKI_LOCAL_DB_PASSWORD:-}
+      MARIADB_ROOT_PASSWORD: ${MEDIAWIKI_LOCAL_DB_ROOT_PASSWORD:-}
+    volumes:
+      - mediawiki_local_db_data:/var/lib/mysql
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  mediawiki-local:
+    image: ${MEDIAWIKI_LOCAL_IMAGE:-mediawiki:1.43.11}
+    container_name: mediawiki-local
+    restart: unless-stopped
+    profiles: ["pro", "connectors"]
+    depends_on:
+      mediawiki-local-db:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-UTC}
+      MW_DB_HOST: mediawiki-local-db
+      MW_DB_NAME: ${MEDIAWIKI_LOCAL_DB_NAME:-mediawiki_local}
+      MW_DB_USER: ${MEDIAWIKI_LOCAL_DB_USER:-mediawiki}
+      MW_DB_PASSWORD: ${MEDIAWIKI_LOCAL_DB_PASSWORD:-}
+      MW_ADMIN_USER: ${MEDIAWIKI_LOCAL_ADMIN_USER:-retriva_admin}
+      MW_ADMIN_PASSWORD: ${MEDIAWIKI_LOCAL_ADMIN_PASSWORD:-}
+      MW_SERVER: ${MEDIAWIKI_LOCAL_SERVER:-http://mediawiki-local}
+      MW_SITE_NAME: ${MEDIAWIKI_LOCAL_SITE_NAME:-Retriva Local Wiki}
+    volumes:
+      - mediawiki_local_config:/config
+    networks:
+      - retriva-net
+    # One-time, non-interactive local-development initialization: install the
+    # wiki into the persistent /config volume on first start, then symlink
+    # LocalSettings.php into the web root and run Apache.  Credentials come only
+    # from the environment (no secrets are written to the repository).
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        for i in $$(seq 1 60); do
+          php -r 'exit(@mysqli_connect(getenv("MW_DB_HOST"),getenv("MW_DB_USER"),getenv("MW_DB_PASSWORD"),getenv("MW_DB_NAME"),3306)?0:1);' && break
+          echo "waiting for mediawiki database ($$i)"; sleep 2
+        done
+        if [ ! -f /config/LocalSettings.php ]; then
+          php /var/www/html/maintenance/install.php \
+            --dbtype mysql --dbserver "$$MW_DB_HOST" --dbname "$$MW_DB_NAME" \
+            --dbuser "$$MW_DB_USER" --dbpass "$$MW_DB_PASSWORD" \
+            --pass "$$MW_ADMIN_PASSWORD" --server "$$MW_SERVER" \
+            --scriptpath "" --lang en "$$MW_SITE_NAME" "$$MW_ADMIN_USER"
+          cp -f /var/www/html/LocalSettings.php /config/LocalSettings.php
+        fi
+        cp -f /config/LocalSettings.php /var/www/html/LocalSettings.php
+        chmod 644 /var/www/html/LocalSettings.php
+        exec apache2-foreground
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost/api.php?action=query&meta=siteinfo&format=json' | grep -q '\"batchcomplete\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
 
   # --- Retriva Pro: Email Agent Connector ---
   # Runs a built-in SMTP server that receives emails sent to a Retriva-managed
