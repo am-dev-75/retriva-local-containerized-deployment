@@ -75,9 +75,16 @@ def _resolve(profiles=()):
     for profile in profiles:
         cmd += ["--profile", profile]
     cmd += ["config"]
+    # Spec 034 / ADR-039: compose requires the Redis role secrets; tests use
+    # synthetic values (never real credentials).
+    env = {**os.environ, "ENV_FILE": str(env_file),
+           "REDIS_BROKER_PASSWORD": "test-broker-pw",
+           "REDIS_RESULTS_PASSWORD": "test-results-pw",
+           "REDIS_MONITOR_PASSWORD": "test-monitor-pw",
+           "REDIS_HEALTH_PASSWORD": "test-health-pw"}
     proc = subprocess.run(
         cmd, capture_output=True, text=True, timeout=120, cwd=str(ROOT),
-        env={**os.environ, "ENV_FILE": str(env_file)})
+        env=env)
     return proc
 
 

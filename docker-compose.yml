@@ -93,20 +93,34 @@ services:
     networks:
       - retriva-net
 
+  # Spec 034 / ADR-039: least-privilege Redis ACLs. Users are rendered from
+  # environment secrets at container start; the default user is disabled
+  # unless REDIS_ALLOW_UNAUTHENTICATED_DEFAULT=yes (staged rollout only).
+  # Host publication is loopback-only; service traffic uses the private
+  # container network. See docs/redis-acl-runbook.md.
   redis:
     image: ${REDIS_IMAGE:-redis:7-alpine}
     container_name: retriva-redis
     restart: unless-stopped
+    entrypoint: ["/bin/sh", "/etc/redis/entrypoint.sh"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+      - ./config/redis/entrypoint.sh:/etc/redis/entrypoint.sh:ro
+      - ./config/redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./config/redis/users.acl.template:/etc/redis/users.acl.template:ro
     environment:
       TZ: ${TZ:-UTC}
+      REDIS_BROKER_PASSWORD: ${REDIS_BROKER_PASSWORD:?set REDIS_BROKER_PASSWORD in the env file}
+      REDIS_RESULTS_PASSWORD: ${REDIS_RESULTS_PASSWORD:?set REDIS_RESULTS_PASSWORD in the env file}
+      REDIS_MONITOR_PASSWORD: ${REDIS_MONITOR_PASSWORD:?set REDIS_MONITOR_PASSWORD in the env file}
+      REDIS_HEALTH_PASSWORD: ${REDIS_HEALTH_PASSWORD:?set REDIS_HEALTH_PASSWORD in the env file}
+      REDIS_ALLOW_UNAUTHENTICATED_DEFAULT: ${REDIS_ALLOW_UNAUTHENTICATED_DEFAULT:-no}
     networks:
       - retriva-net
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG || exit 1"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_HEALTH_PASSWORD\" redis-cli --user rtrv-health ping | grep PONG || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -199,9 +213,9 @@ services:
       # Local-dev behavior
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
       LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
-      # ── Celery / Redis ─────────────────────────────────────────────────
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      # ── Celery / Redis (Spec 034 / ADR-039 least-privilege identities) ──
+      CELERY_BROKER_URL: "redis://rtrv-broker:${REDIS_BROKER_PASSWORD:?set REDIS_BROKER_PASSWORD in the env file}@redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://rtrv-results:${REDIS_RESULTS_PASSWORD:?set REDIS_RESULTS_PASSWORD in the env file}@redis:6379/1"
       CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-1}
       CELERY_TASK_MAX_RETRIES: ${CELERY_TASK_MAX_RETRIES:-3}
       # --- GraphRAG ---
@@ -369,6 +383,9 @@ services:
       - ${ENV_FILE:-.env}
     environment:
       TZ: ${TZ:-UTC}
+      # Spec 034 / ADR-039: least-privilege broker (DB 0) and result (DB 1) identities.
+      CELERY_BROKER_URL: "redis://rtrv-broker:${REDIS_BROKER_PASSWORD:?set REDIS_BROKER_PASSWORD in the env file}@redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://rtrv-results:${REDIS_RESULTS_PASSWORD:?set REDIS_RESULTS_PASSWORD in the env file}@redis:6379/1"
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       RETRIVA_DEFAULT_COLLECTION: ${RETRIVA_DEFAULT_COLLECTION:-retriva_chunks}
       TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
@@ -405,8 +422,6 @@ services:
       TASK_SYSTEM_PROMPT: ${TASK_SYSTEM_PROMPT:-}
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
       LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
       CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-1}
       CELERY_TASK_MAX_RETRIES: ${CELERY_TASK_MAX_RETRIES:-3}
       # --- GraphRAG ---
