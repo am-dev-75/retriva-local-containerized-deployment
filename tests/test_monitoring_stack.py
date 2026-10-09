@@ -186,14 +186,46 @@ def test_prometheus_links_alertmanager_and_inhibition_exempts_nopass():
     assert am.count('alertname!="RedisDefaultOrNopassAuthSuccess"') == 2
 
 
-def test_pg_collector_is_aggregate_only():
+def test_pg_collector_consumes_only_the_accepted_aggregate_interface():
     script = (CONFIG / "exporters" / "pg_monitor_collector.sh").read_text()
-    assert "SELECT count(*) FROM jobs.jobs" in script
+    # the accepted interface call is the sole source of the metric
+    assert 'SELECT monitoring.nonterminal_job_count();' in script
+    # no direct-table query, no fallback, no tenant loop, no dynamic SQL
+    assert "jobs.jobs" not in script
+    assert "FROM " not in script
+    assert "DO $$" not in script
+    assert "EXECUTE format" not in script
+    assert "quote_ident" not in script
+    selects = [line for line in script.splitlines() if "SELECT " in line]
+    assert len(selects) == 1, selects
     assert "statement_timeout=5000" in script
     for metric in PG_METRICS:
         assert metric in script, metric
     for forbidden in ("tenant_id", "job_id", "attempt_id", "task_id"):
         assert forbidden not in script, forbidden
+
+
+def test_metric_contract_grant_template_is_execute_only():
+    contract = (CONFIG / "metric-contract.md").read_text()
+    assert "GRANT CONNECT ON DATABASE retriva TO retriva_monitor;" in contract
+    assert "GRANT USAGE ON SCHEMA monitoring TO retriva_monitor;" in contract
+    assert ("GRANT EXECUTE ON FUNCTION monitoring.nonterminal_job_count()"
+            in contract)
+    # no direct table access is ever granted to the monitoring login
+    assert "ON TABLE jobs" not in contract
+    assert "ON jobs.jobs" not in contract
+    assert "ON SCHEMA jobs" not in contract
+
+
+def test_runbook_documents_migration_grant_and_rollback_order():
+    text = RUNBOOK.read_text()
+    assert "core.jobs" in text and "V002" in text
+    assert "EXECUTE-only grant template" in text
+    assert "REVOKE EXECUTE ON FUNCTION monitoring.nonterminal_job_count()" \
+        in text
+    assert "DROP ROLE retriva_monitor" in text
+    assert "never touches application roles, tables, policies, or data" \
+        in text
 
 
 def test_metric_contract_documents_labels_and_forbidden_data():

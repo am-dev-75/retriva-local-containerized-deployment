@@ -1,6 +1,6 @@
 #!/bin/sh
 # Read-only PostgreSQL aggregate collector for the canonical Retriva monitoring
-# stack (Spec 035 / ADR-040).
+# stack (Spec 035 / ADR-040; source corrected by Spec 036 / ADR-041).
 #
 # Exposes ONLY aggregate counts through a tiny static HTTP endpoint:
 #   retriva_pg_nonterminal_jobs
@@ -8,10 +8,15 @@
 #   retriva_pg_monitor_last_success_timestamp_seconds
 #   retriva_pg_monitor_query_errors_total
 #
-# Security: dedicated least-privilege read-only role; single indexed aggregate
-# query; statement timeout; counts only; never exports tenant/job/attempt/task
-# identifiers, content, or errors. Password comes from the environment
-# (accepted secret interface) and never appears in argv or output.
+# Security: dedicated least-privilege monitoring login with CONNECT +
+# USAGE on the monitoring schema + EXECUTE on
+# monitoring.nonterminal_job_count() ONLY.  No direct table query, no
+# fallback, no tenant loop, no dynamic SQL; the aggregate is the sole
+# source of retriva_pg_nonterminal_jobs.  Statement timeout is enforced
+# at this session boundary.  Failures fail closed (up=0 + error counter,
+# last value retained) and never echo SQL text, credentials, tenants, or
+# identifiers.  The password comes from the environment (accepted secret
+# interface) and never appears in argv or output.
 set -eu
 
 : "${PGHOST:?PGHOST required}"
@@ -30,7 +35,7 @@ errors=0
 collect() {
     timestamp="$(date +%s)"
     if count="$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
-        -Atc "SELECT count(*) FROM jobs.jobs WHERE status NOT IN ('succeeded','failed','cancelled');" 2>/dev/null)"; then
+        -Atc "SELECT monitoring.nonterminal_job_count();" 2>/dev/null)"; then
         up=1
         last_success="$timestamp"
     else

@@ -157,33 +157,34 @@ credential failed.
 `MonitoringPostgresGaugeStale` (warning): `retriva_pg_nonterminal_jobs` has not
 refreshed.
 
-1. Check collector logs and the read-only role grant. Under the currently
-   committed design the collector role has `CONNECT`, `USAGE` on schema
-   `jobs`, and `SELECT` on `jobs.jobs` — no other grants.
-2. Confirm the database is reachable and the query respects the statement
-   timeout (`PGOPTIONS=-c statement_timeout=5000`).
+1. Check collector logs. The dedicated monitoring login has exactly
+   `CONNECT`, `USAGE` on schema `monitoring`, and `EXECUTE` on
+   `monitoring.nonterminal_job_count()` — no table grants, no `BYPASSRLS`,
+   no write/DDL/SET ROLE capability.
+2. Confirm the database is reachable, the Core migration
+   (`core.jobs` V002) that creates the interface has been applied, and the
+   session respects the statement timeout
+   (`PGOPTIONS=-c statement_timeout=5000`).
 3. Restart only the `retriva-pg-monitor-exporter` service after verifying the
-   role.
+   interface and grants; a missing function or missing/revoked `EXECUTE`
+   fails closed (`retriva_pg_monitor_up=0` plus the error counter, last value
+   retained).
 
-**Known limitation (recorded 2026-10-09):** `jobs.jobs` carries
-`FORCE ROW LEVEL SECURITY`; without a tenant or the controlled privileged
-flag, the direct `SELECT count(*)` source observes zero rows — the gauge is
-structurally `0` even while durable non-terminal jobs exist. The correct
-source is the proposed aggregate-only interface in Spec 036 / ADR-041
-(`jobs.monitoring_nonterminal_job_count()`, `EXECUTE`-only grants). Until
-those are accepted and implemented, a monitoring deployment must not be
-declared `CLOSED_SUCCESS` while this metric is relied upon, and operators
-must treat the PostgreSQL term of `RedisQueueDisappearance` as unavailable.
-After acceptance and implementation, verification is:
+Interface and RLS verification (as the monitoring login, through psql with
+the session timeout; the count must equal the authoritative global query run
+separately by an operator as the administrator):
 
 ```sql
--- as the monitoring login role, through psql with the session timeout
-SELECT jobs.monitoring_nonterminal_job_count();       -- correct cross-tenant count
-SELECT count(*) FROM jobs.jobs;                       -- must be denied (no table SELECT)
+SELECT monitoring.nonterminal_job_count();  -- exact global non-terminal count
+SELECT count(*) FROM jobs.jobs;             -- must be denied (no table access)
 ```
 
-plus catalog checks that `FORCE ROW LEVEL SECURITY` is still enabled and that
-`PUBLIC` has no `EXECUTE` on the function.
+plus catalog checks that `FORCE ROW LEVEL SECURITY` is still enabled and
+forced on `jobs.jobs`, that the function owner is the dedicated non-login
+role, that `PUBLIC` has no `EXECUTE`, and that the login holds no direct
+table `SELECT`. The migration/interface is Core-owned:
+`core.jobs` V002 `monitoring_aggregate_interface`; its rollback removes the
+function, its schema, and the owner grants only.
 
 ## Safe evidence collection
 
@@ -263,6 +264,16 @@ Never run a bare profile-level `down`: base-profile services are always
 enabled and would be removed with it. Always use the explicit five-service
 stop/remove form above.
 
+PostgreSQL monitoring preparation order (live deployment): (1) apply the
+Core migration through the canonical migration one-shot — the bootstrap
+one-shot provisions the non-login owner role and the migrator membership,
+then the `core.jobs` V002 migration creates the monitoring schema and the
+`monitoring.nonterminal_job_count()` interface; (2) create the monitoring
+login and apply the EXECUTE-only grant template from the metric contract;
+(3) start the monitoring profile. Never create the login grants before the
+interface exists. Verify the grants with the interface/RLS checks in
+[Postgres gauge collector failure](#postgres-gauge-collector-failure).
+
 Target and routing verification (canonical DNS names only):
 
 ```bash
@@ -291,8 +302,11 @@ Prometheus, Alertmanager, and python:3.12-alpine image digests.
   [Canonical deployment and verification commands](#canonical-deployment-and-verification-commands);
   application and Redis state are untouched.
 - To remove permanently: remove the monitoring services/volumes from the
-  deployment compose and the `config/monitoring/` tree; revoke the read-only
-  PostgreSQL monitor role (currently `SELECT`-based; after Spec 036 / ADR-041
-  acceptance, revoke `EXECUTE` on the interface instead).
+  deployment compose and the `config/monitoring/` tree; revoke the
+  monitoring login's `EXECUTE` grant, then drop the monitoring login
+  (`REVOKE EXECUTE ON FUNCTION monitoring.nonterminal_job_count() FROM
+  retriva_monitor; DROP ROLE retriva_monitor;`). The Core migration's
+  rollback removes the function, its schema, and the owner grants — it
+  never touches application roles, tables, policies, or data.
 - Rolling back a bad rule/config change: restore the previous committed
   revision, validate with `promtool`, and reload.

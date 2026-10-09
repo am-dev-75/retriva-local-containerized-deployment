@@ -39,37 +39,46 @@ Counter semantics: ACL LOG counters adopt pre-existing entries without counting
 them at exporter start and increment on observed growth; growth survives ACL
 LOG ring-buffer aging. Prometheus `increase()` tolerates exporter restarts.
 
-## PostgreSQL collector (`pg-monitor-exporter`, dedicated read-only role)
+## PostgreSQL collector (`pg-monitor-exporter`, dedicated monitoring login)
 
 | Metric | Type | Labels | Source | Healthy baseline | Failure semantics |
 |---|---|---|---|---|---|
-| `retriva_pg_nonterminal_jobs` | gauge | – | `SELECT count(*) FROM jobs.jobs WHERE status NOT IN ('succeeded','failed','cancelled')` | 0 in the steady stack | last value retained while stale; staleness alert fires |
-| `retriva_pg_monitor_up` | gauge | – | collector | 1 | 0 on query failure |
+| `retriva_pg_nonterminal_jobs` | gauge | – | `SELECT monitoring.nonterminal_job_count();` (returns one `bigint`; exact global non-terminal durable-job count across all tenants) | 0 in the steady stack | last value retained while stale; staleness alert fires |
+| `retriva_pg_monitor_up` | gauge | – | collector | 1 | 0 on query/permission failure |
 | `retriva_pg_monitor_last_success_timestamp_seconds` | gauge | – | collector | now-15s | stale ⇒ `MonitoringPostgresGaugeStale` |
 | `retriva_pg_monitor_query_errors_total` | counter | – | collector | 0 | grows on failures |
 
-Least-privilege grant template (live deployment step; no schema change):
+Security semantics (Spec 036 / ADR-041, implemented): the aggregate is the
+sole source of `retriva_pg_nonterminal_jobs`; it is a migration-managed,
+no-argument `SECURITY DEFINER` function in the dedicated `monitoring` schema,
+owned by the dedicated non-login role `retriva_monitor_owner`, with
+`REVOKE ALL ... FROM PUBLIC` and a fixed `search_path = pg_catalog`.  FORCE
+ROW LEVEL SECURITY on `jobs.jobs` remains enabled and enforced; the
+monitoring login has **no row visibility** — direct table `SELECT` is denied
+(schema access is not granted), and the function returns counts only, with no
+tenant, job, attempt, task, payload, or free-text data.  The collector has no
+direct-table query, no fallback, no tenant loop, and no dynamic SQL.
+
+Least-privilege grant template (live deployment step, applied after the Core
+migration that creates the interface; no direct table grants):
 
 ```sql
 CREATE ROLE retriva_monitor LOGIN PASSWORD :'monitor_password';
 GRANT CONNECT ON DATABASE retriva TO retriva_monitor;
-GRANT USAGE ON SCHEMA jobs TO retriva_monitor;
-GRANT SELECT ON TABLE jobs.jobs TO retriva_monitor;
+GRANT USAGE ON SCHEMA monitoring TO retriva_monitor;
+GRANT EXECUTE ON FUNCTION monitoring.nonterminal_job_count()
+    TO retriva_monitor;
 ```
 
-Statement timeout is enforced via `PGOPTIONS=-c statement_timeout=5000`.
+Rollback revokes only the monitoring login's `EXECUTE` and drops that login;
+the Core migration's rollback removes the function, its schema, and the
+owner's grants.
 
-Known limitation (recorded 2026-10-09, Spec 036 / ADR-041 PROPOSED):
-`jobs.jobs` enforces `FORCE ROW LEVEL SECURITY`, so without a tenant context
-the direct `SELECT count(*)` source observes zero rows and this gauge is
-structurally `0` even while durable non-terminal jobs exist. The proposed
-correction sources the metric through the migration-managed, aggregate-only
-interface `jobs.monitoring_nonterminal_job_count()` with `EXECUTE`-only
-grants (no table `SELECT`, no `BYPASSRLS`) and a dedicated non-login definer
-role. The metric name, labels, baseline, and failure semantics above do not
-change; only the `Source` and the grant template change once Spec 036 and
-ADR-041 are accepted and implemented. Do not declare a monitoring deployment
-`CLOSED_SUCCESS` while this limitation stands.
+Statement timeout is enforced via `PGOPTIONS=-c statement_timeout=5000` at
+the collector session boundary.  Collector failures fail closed (`up=0` plus
+the error counter, last successful value retained with its timestamp); the
+collector never emits SQL text, credentials, tenant names, identifiers, or
+exception payloads.
 
 ## Alert routing ledger
 
