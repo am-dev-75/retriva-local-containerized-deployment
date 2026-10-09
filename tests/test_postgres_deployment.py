@@ -76,12 +76,16 @@ def _resolve(profiles=()):
         cmd += ["--profile", profile]
     cmd += ["config"]
     # Spec 034 / ADR-039: compose requires the Redis role secrets; tests use
-    # synthetic values (never real credentials).
+    # synthetic values (never real credentials).  Spec 035 / ADR-040: the
+    # monitoring profile requires the read-only PostgreSQL monitor role
+    # references; synthetic values are injected here as well.
     env = {**os.environ, "ENV_FILE": str(env_file),
            "REDIS_BROKER_PASSWORD": "test-broker-pw",
            "REDIS_RESULTS_PASSWORD": "test-results-pw",
            "REDIS_MONITOR_PASSWORD": "test-monitor-pw",
-           "REDIS_HEALTH_PASSWORD": "test-health-pw"}
+           "REDIS_HEALTH_PASSWORD": "test-health-pw",
+           "RETRIVA_PG_MONITOR_USER": "retriva_monitor",
+           "RETRIVA_PG_MONITOR_PASSWORD": "test-pg-monitor-pw"}
     proc = subprocess.run(
         cmd, capture_output=True, text=True, timeout=120, cwd=str(ROOT),
         env=env)

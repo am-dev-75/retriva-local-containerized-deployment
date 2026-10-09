@@ -6,6 +6,10 @@ networks:
     driver: bridge
 
 volumes:
+  # Spec 035 / ADR-040 monitoring stack
+  prometheus_data:
+  alertmanager_data:
+  alert_sink_data:
   qdrant_storage:
   retriva_core_storage:
   retriva_gateway_storage:
@@ -22,6 +26,134 @@ volumes:
   retriva_pgadmin_data:
 
 services:
+
+  # --- Spec 035 / ADR-040: canonical monitoring stack (profile "monitoring") ---
+  # Private network only (no host publication). Pinned images. Read-only
+  # collectors using rtrv-monitor (Redis) and a least-privilege PostgreSQL role.
+  # Deployment/rollback and runbooks: docs/monitoring-runbook.md.
+  retriva-prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.15.0}
+    container_name: retriva-prometheus
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-30d}
+      - --web.listen-address=0.0.0.0:9090
+      - --web.enable-lifecycle
+    volumes:
+      - ./config/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  retriva-alertmanager:
+    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.34.1}
+    container_name: retriva-alertmanager
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./config/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9093/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  retriva-alert-sink:
+    image: ${PYTHON_ALPINE_IMAGE:-python:3.12-alpine}
+    container_name: retriva-alert-sink
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    command: python /opt/monitoring/alert_sink.py
+    environment:
+      TZ: ${TZ:-UTC}
+      SINK_PORT: "9099"
+      SINK_LOG: /sink/alerts.log
+    volumes:
+      - ./config/monitoring/exporters/alert_sink.py:/opt/monitoring/alert_sink.py:ro
+      - alert_sink_data:/sink
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:9099/healthz',timeout=3)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  retriva-redis-monitor-exporter:
+    image: ${PYTHON_ALPINE_IMAGE:-python:3.12-alpine}
+    container_name: retriva-redis-monitor-exporter
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    command: python /opt/monitoring/redis_monitor_exporter.py
+    environment:
+      TZ: ${TZ:-UTC}
+      REDIS_MONITOR_HOST: redis
+      REDIS_MONITOR_PORT: "6379"
+      REDIS_MONITOR_USERNAME: rtrv-monitor
+      REDIS_MONITOR_PASSWORD: ${REDIS_MONITOR_PASSWORD:?set REDIS_MONITOR_PASSWORD in the env file}
+      EXPORTER_PORT: "9187"
+      POLL_INTERVAL_SECONDS: ${REDIS_EXPORTER_POLL_SECONDS:-15}
+    volumes:
+      - ./config/monitoring/exporters/redis_monitor_exporter.py:/opt/monitoring/redis_monitor_exporter.py:ro
+    networks:
+      - retriva-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:9187/healthz',timeout=3)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  retriva-pg-monitor-exporter:
+    image: ${RETRIVA_PG_IMAGE:-postgres:16.15-alpine}
+    container_name: retriva-pg-monitor-exporter
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    entrypoint: ["/bin/sh", "/opt/monitoring/pg_monitor_collector.sh"]
+    environment:
+      TZ: ${TZ:-UTC}
+      PGHOST: retriva-postgres
+      PGPORT: "5432"
+      PGDATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      PGUSER: ${RETRIVA_PG_MONITOR_USER:?set RETRIVA_PG_MONITOR_USER in the env file}
+      PGPASSWORD: ${RETRIVA_PG_MONITOR_PASSWORD:?set RETRIVA_PG_MONITOR_PASSWORD in the env file}
+      PGOPTIONS: -c statement_timeout=5000
+      METRICS_PORT: "9188"
+      PG_POLL_INTERVAL_SECONDS: ${PG_MONITOR_POLL_SECONDS:-15}
+    volumes:
+      - ./config/monitoring/exporters/pg_monitor_collector.sh:/opt/monitoring/pg_monitor_collector.sh:ro
+    networks:
+      - retriva-net
+    depends_on:
+      retriva-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9188/metrics | grep -q retriva_pg_nonterminal_jobs || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
   qdrant:
     image: ${QDRANT_IMAGE:-qdrant/qdrant:latest}
     container_name: retriva-qdrant

@@ -1,0 +1,42 @@
+# Spec 035 / ADR-040 — Alertmanager configuration (canonical monitoring stack).
+#
+# Safe default routing: all alerts are delivered to the local alert sink, which
+# performs no external notification and holds no receiver secrets. External
+# receivers are added by the operator through the deployment's external secret
+# interface (never committed). Grouping and inhibition prevent alert storms.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: monitoring-sink
+  group_by: [alertname, service]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: monitoring-sink
+      continue: false
+
+receivers:
+  - name: monitoring-sink
+    webhook_configs:
+      - url: http://alert-sink:9099/alerts
+        send_resolved: true
+
+inhibit_rules:
+  # A down collector means Redis metrics are stale; inhibit Redis alerts until
+  # the collector is healthy again (the collector-down alert still fires).
+  - source_matchers:
+      - alertname="MonitoringCollectorScrapeDown"
+    target_matchers:
+      - service="redis"
+    equal: []
+  # Exporter authentication failure blinds all Redis signals; inhibit the
+  # derived Redis alerts while the dedicated auth-failure alert fires.
+  - source_matchers:
+      - alertname="MonitoringRedisExporterAuthFailures"
+    target_matchers:
+      - service="redis"
+    equal: []
