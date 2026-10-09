@@ -191,9 +191,31 @@ class Exporter:
     def __init__(self):
         self.metrics = Metrics()
         # ACL LOG accumulation state: entry-id -> last observed count.
+        # The first poll snapshots existing entry-ids WITHOUT counting them;
+        # afterwards every unseen entry-id is new and counted in full, and
+        # seen entry-ids contribute their growth.  This makes denials and
+        # auth failures that occur after exporter start visible immediately.
+        self._acl_bootstrapped = False
         self._acl_entry_counts: dict[int, int] = {}
+        # Pre-seed the rule-referenced counters as continuous zero series so a
+        # restart never leaves a scrape gap: Prometheus can then detect the
+        # reset (value drop to 0) and `increase()` stays correct across
+        # exporter recreations.
         self._acl_counters: dict[tuple, float] = {}
-        # binding churn state: set key -> frozenset of members.
+        for role in ("broker", "results", "monitor", "other"):
+            for category in ("destructive", "other"):
+                self._acl_counters[
+                    ("redis_acl_denied_commands_total",
+                     (("role", role), ("category", category)))
+                ] = 0.0
+        self._acl_counters[("redis_auth_failures_total", ())] = 0.0
+        self._acl_counters[("redis_acl_emergency_use_total", ())] = 0.0
+        self._acl_counters[("redis_acl_default_auth_success_total", ())] = 0.0
+        # binding churn state: set key -> set of members.  The first poll
+        # adopts existing sets without counting them; afterwards a brand-new
+        # binding set counts all of its members and known sets count member
+        # additions (routing-metadata creation events).
+        self._binding_bootstrapped = False
         self._binding_members: dict[str, set] = {}
         self._binding_churn = 0.0
         self._default_usable_prev = 0
@@ -208,20 +230,40 @@ class Exporter:
             with self.metrics.lock:
                 self.metrics.up = 1
                 self.metrics.last_success = time.time()
-        except RespAuthError:
+        except RespAuthError as exc:
             with self.metrics.lock:
                 self.metrics.up = 0
                 self.metrics.auth_failures += 1
-        except Exception:
+            self._note_protected_mode_nopass(str(exc))
+        except Exception as exc:
             with self.metrics.lock:
                 self.metrics.up = 0
                 self.metrics.scrape_errors += 1
+            self._note_protected_mode_nopass(str(exc))
         finally:
             if client is not None:
                 try:
                     client.close()
                 except Exception:
                     pass
+
+    def _note_protected_mode_nopass(self, error_text: str) -> None:
+        """Detect the `default on nopass` posture from the protected-mode denial.
+
+        With `default on nopass`, protected mode refuses every non-loopback
+        connection and the message literally states that no password is set for
+        the default user.  That IS the hardening regression the A6b class must
+        detect, so the flag and counter are raised even though the probe itself
+        cannot connect.
+        """
+        if "protected mode" in error_text and "no password is set for the default user" in error_text:
+            if self._default_usable_prev == 0:
+                self._default_success += 1
+            self._default_usable_prev = 1
+            self.metrics.set("redis_acl_default_usable", 1)
+            self.metrics.set_counter(
+                "redis_acl_default_auth_success_total", self._default_success
+            )
 
     def _collect(self, client: RedisClient) -> None:
         m = self.metrics
@@ -244,6 +286,7 @@ class Exporter:
                     continue
         for db_name, count in db_keys.items():
             m.set("redis_db_keys", count, db=db_name)
+        m.set("redis_db_keys_total", float(sum(db_keys.values())))
         rdb_ok = 0
         for line in info.splitlines():
             if line.startswith("rdb_last_bgsave_status:"):
@@ -268,14 +311,21 @@ class Exporter:
         additions = 0
         for key, members in current.items():
             previous = self._binding_members.get(key, None)
-            if previous is not None:
+            if not self._binding_bootstrapped:
+                continue  # adopt pre-existing sets on the first poll
+            if previous is None:
+                additions += len(members)  # new binding set == creation event
+            else:
                 additions += len(members - previous)
         self._binding_members = current
+        self._binding_bootstrapped = True
         self._binding_churn += additions
         m.set("redis_binding_sets", len(current))
         m.set_counter("redis_binding_recreation_events_total", self._binding_churn)
-        # result records
+        # result records (result backend lives in DB 1)
+        client.command("SELECT", "1")
         results = client.scan_match("celery-task-meta-*")
+        client.command("SELECT", "0")
         m.set("redis_result_records_total", len(results))
         # ACL LOG aggregates
         self._collect_acl_log(client, m)
@@ -293,6 +343,7 @@ class Exporter:
 
     def _collect_acl_log(self, client: RedisClient, m: Metrics) -> None:
         entries = client.command("ACL", "LOG", "128") or []
+        parsed = []
         for entry in entries:
             record = {}
             for index in range(0, len(entry) - 1, 2):
@@ -302,13 +353,20 @@ class Exporter:
                 count = int(record.get("count", 1))
             except (TypeError, ValueError):
                 continue
+            parsed.append((entry_id, count, record))
+        if not self._acl_bootstrapped:
+            # Snapshot pre-existing entries once without counting them.
+            for entry_id, count, _record in parsed:
+                self._acl_entry_counts[entry_id] = count
+            self._acl_bootstrapped = True
+            return
+        for entry_id, count, record in parsed:
             previous = self._acl_entry_counts.get(entry_id)
             self._acl_entry_counts[entry_id] = count
             if previous is None:
-                # Adopt pre-existing entries without counting them; only growth
-                # after exporter start is attributed to the counters.
-                continue
-            delta = max(0, count - previous)
+                delta = count  # brand-new entry observed after bootstrap
+            else:
+                delta = max(0, count - previous)
             if delta == 0:
                 continue
             reason = str(record.get("reason", "command"))

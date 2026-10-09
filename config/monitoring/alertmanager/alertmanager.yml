@@ -32,11 +32,15 @@ inhibit_rules:
       - alertname="MonitoringCollectorScrapeDown"
     target_matchers:
       - service="redis"
+      - alertname!="RedisDefaultOrNopassAuthSuccess"
     equal: []
   # Exporter authentication failure blinds all Redis signals; inhibit the
-  # derived Redis alerts while the dedicated auth-failure alert fires.
+  # derived Redis alerts while the dedicated auth-failure alert fires.  The
+  # default/nopass detector is exempt: it fires from the same outage evidence
+  # and must not be hidden by the storm control.
   - source_matchers:
       - alertname="MonitoringRedisExporterAuthFailures"
     target_matchers:
       - service="redis"
+      - alertname!="RedisDefaultOrNopassAuthSuccess"
     equal: []

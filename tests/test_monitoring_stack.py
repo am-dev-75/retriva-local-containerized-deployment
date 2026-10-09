@@ -101,6 +101,19 @@ def test_monitoring_images_are_pinned():
     assert services["retriva-alertmanager"]["image"] == (
         "${ALERTMANAGER_IMAGE:-" + AM_IMAGE + "}"
     )
+    # The PostgreSQL collector uses a locally built derived image (repo
+    # convention for deployment-owned images): base pinned postgres plus the
+    # busybox-extras httpd applet the base image lacks.
+    assert services["retriva-pg-monitor-exporter"]["build"]["dockerfile"] == (
+        "Dockerfile.pg-monitor"
+    )
+    assert (CONFIG / "exporters" / "Dockerfile.pg-monitor").exists()
+    assert "postgres:16.15-alpine" in (
+        CONFIG / "exporters" / "Dockerfile.pg-monitor"
+    ).read_text()
+    assert "busybox-extras" in (
+        CONFIG / "exporters" / "Dockerfile.pg-monitor"
+    ).read_text()
     for name in MONITORING_SERVICES:
         image = services[name]["image"]
         assert ":latest" not in image, name
@@ -153,6 +166,24 @@ def test_redis_exporter_is_read_only_and_monitor_only():
     assert 'os.environ.get("REDIS_MONITOR_USERNAME", "rtrv-monitor")' in script
     for metric in REDIS_METRICS:
         assert metric in script, metric
+
+
+def test_rule_metric_names_are_emitted_by_collectors():
+    # The validated A3a expression uses redis_db_keys_total; the result-record
+    # rule needs a DB1 scan.  Both are regression points from isolated
+    # validation.
+    script = (CONFIG / "exporters" / "redis_monitor_exporter.py").read_text()
+    assert "redis_db_keys_total" in script
+    assert 'client.command("SELECT", "1")' in script
+    assert "no password is set for the default user" in script  # nopass detection
+
+
+def test_prometheus_links_alertmanager_and_inhibition_exempts_nopass():
+    prom = (CONFIG / "prometheus" / "prometheus.yml").read_text()
+    assert "alerting:" in prom
+    assert "alertmanager:9093" in prom
+    am = (CONFIG / "alertmanager" / "alertmanager.yml").read_text()
+    assert am.count('alertname!="RedisDefaultOrNopassAuthSuccess"') == 2
 
 
 def test_pg_collector_is_aggregate_only():

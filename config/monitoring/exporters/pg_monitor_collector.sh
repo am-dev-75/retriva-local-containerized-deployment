@@ -55,7 +55,7 @@ collect() {
         echo "# TYPE retriva_pg_monitor_query_errors_total counter"
         echo "retriva_pg_monitor_query_errors_total $errors"
     } > "$tmp"
-    mv "$tmp" "$METRICS_DIR/metrics"
+    mv "$tmp" "$METRICS_DIR/metrics.txt"
 }
 
 # collect once before serving so the endpoint is valid immediately
@@ -66,4 +66,6 @@ collect
         collect
     done
 ) &
-exec busybox httpd -f -p "$METRICS_PORT" -h "$METRICS_DIR"
+# Serve the metrics file. The derived image (Dockerfile.pg-monitor) adds the
+# busybox-extras httpd applet that the base postgres image lacks.
+exec httpd -f -p "$METRICS_PORT" -h "$METRICS_DIR"

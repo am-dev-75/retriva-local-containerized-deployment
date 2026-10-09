@@ -1,0 +1,6 @@
+# Spec 035 / ADR-040 — derived image for the read-only PostgreSQL gauge
+# collector.  The base postgres image ships a busybox build without the httpd
+# applet; busybox-extras adds it so the committed collector can serve /metrics
+# with the same pattern as the other monitoring services.
+FROM postgres:16.15-alpine
+RUN apk add --no-cache busybox-extras
