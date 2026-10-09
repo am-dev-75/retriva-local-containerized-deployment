@@ -181,7 +181,7 @@ def test_rule_metric_names_are_emitted_by_collectors():
 def test_prometheus_links_alertmanager_and_inhibition_exempts_nopass():
     prom = (CONFIG / "prometheus" / "prometheus.yml").read_text()
     assert "alerting:" in prom
-    assert "alertmanager:9093" in prom
+    assert "retriva-alertmanager:9093" in prom
     am = (CONFIG / "alertmanager" / "alertmanager.yml").read_text()
     assert am.count('alertname!="RedisDefaultOrNopassAuthSuccess"') == 2
 
@@ -270,7 +270,7 @@ def test_alertmanager_config_valid_and_safe_default_route():
     receivers = {receiver["name"]: receiver for receiver in config["receivers"]}
     assert "monitoring-sink" in receivers
     webhook = receivers["monitoring-sink"]["webhook_configs"][0]
-    assert webhook["url"] == "http://alert-sink:9099/alerts"
+    assert webhook["url"] == "http://retriva-alert-sink:9099/alerts"
     assert webhook["send_resolved"] is True
     assert config["route"]["receiver"] == "monitoring-sink"
     assert config["route"]["group_by"]
@@ -280,6 +280,143 @@ def test_alertmanager_config_valid_and_safe_default_route():
         if forbidden == "@":
             continue
         assert forbidden not in text, forbidden
+
+
+# ------------------------------------------------- canonical topology ----
+#
+# One canonical naming source: the Compose model. Every hostname used by the
+# committed monitoring configuration must be a Compose service name or a
+# declared network alias of this repository, so a config can never again
+# reference an isolated-harness-only name. Reachability of these names is
+# proven live in the canonical isolated end-to-end validation; these tests
+# prove resolution against the declared model deterministically.
+
+HARNESS_ONLY_HOSTNAMES = {
+    "alertmanager",
+    "alert-sink",
+    "redis-monitor-exporter",
+    "pg-monitor-exporter",
+    "prometheus",
+}
+
+
+def _compose_declared_names() -> set:
+    """Every DNS name the canonical Compose network registers: service names
+    plus per-service network aliases."""
+    names = set()
+    for service, spec in _compose()["services"].items():
+        names.add(service)
+        if isinstance(spec, dict):
+            networks = spec.get("networks") or []
+            if isinstance(networks, dict):
+                entries = networks.values()
+            else:
+                entries = networks
+            for entry in entries:
+                if isinstance(entry, dict):
+                    names.update(entry.get("aliases") or [])
+    return names
+
+
+def _hostname_of(target: str) -> str:
+    return target.split("://", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+
+
+def _port_of(target: str) -> str:
+    hostport = target.split("://", 1)[-1].split("/", 1)[0]
+    return hostport.split(":", 1)[1] if ":" in hostport else ""
+
+
+def _monitoring_config_hostnames() -> list:
+    prom = yaml.safe_load(
+        (CONFIG / "prometheus" / "prometheus.yml").read_text()
+    )
+    targets = []
+    for entry in prom.get("alerting", {}).get("alertmanagers", []):
+        for cfg in entry.get("static_configs", []):
+            targets.extend(cfg.get("targets", []))
+    for job in prom.get("scrape_configs", []):
+        for cfg in job.get("static_configs", []):
+            targets.extend(cfg.get("targets", []))
+    am = yaml.safe_load(
+        (CONFIG / "alertmanager" / "alertmanager.yml").read_text()
+    )
+    urls = []
+    for receiver in am.get("receivers", []):
+        for webhook in receiver.get("webhook_configs", []) or []:
+            urls.append(webhook["url"])
+    return targets, urls
+
+
+def test_monitoring_targets_resolve_to_canonical_compose_names():
+    declared = _compose_declared_names()
+    targets, urls = _monitoring_config_hostnames()
+    assert targets, "prometheus must define targets"
+    for target in targets + urls:
+        host = _hostname_of(target)
+        # the only permitted non-service hostname is the Prometheus
+        # self-scrape loopback target
+        if host in {"localhost", "127.0.0.1"}:
+            assert _port_of(target) == "9090", target
+            continue
+        assert host in declared, (
+            f"{host!r} from {target!r} is not a canonical Compose service "
+            f"name or declared alias: registered names are {sorted(declared)}"
+        )
+
+
+def test_no_isolated_harness_hostnames_in_production_config():
+    targets, urls = _monitoring_config_hostnames()
+    offenders = [
+        t for t in targets + urls if _hostname_of(t) in HARNESS_ONLY_HOSTNAMES
+    ]
+    assert not offenders, (
+        "isolated-harness-only hostnames are forbidden in the committed "
+        f"monitoring configuration: {offenders}"
+    )
+    # Defensive raw check: the exact harness-only endpoints must never
+    # reappear anywhere in the committed monitoring tree (word-boundary
+    # safe: `retriva-alertmanager:9093` is canonical and permitted).
+    for path in CONFIG.rglob("*"):
+        if not path.is_file():
+            continue
+        text = path.read_text(errors="ignore")
+        for endpoint in (
+            "alertmanager:9093",
+            "alert-sink:9099",
+            "redis-monitor-exporter:9187",
+            "pg-monitor-exporter:9188",
+        ):
+            pattern = r"(?<![\w-])" + re.escape(endpoint)
+            assert not re.search(pattern, text), (str(path), endpoint)
+
+
+def test_monitoring_target_ports_match_declared_compose_env():
+    services = _compose()["services"]
+    targets, urls = _monitoring_config_hostnames()
+    redis_target = [t for t in targets if "redis-monitor" in t][0]
+    pg_target = [t for t in targets if "pg-monitor" in t][0]
+    assert _port_of(redis_target) == services[
+        "retriva-redis-monitor-exporter"
+    ]["environment"]["EXPORTER_PORT"]
+    assert _port_of(pg_target) == services[
+        "retriva-pg-monitor-exporter"
+    ]["environment"]["METRICS_PORT"]
+    assert _port_of(urls[0]) == services["retriva-alert-sink"][
+        "environment"
+    ]["SINK_PORT"]
+    assert _hostname_of(urls[0]) == "retriva-alert-sink"
+
+
+def test_collector_dependency_hosts_are_canonical_compose_services():
+    declared = _compose_declared_names()
+    services = _compose()["services"]
+    redis_host = services["retriva-redis-monitor-exporter"][
+        "environment"
+    ]["REDIS_MONITOR_HOST"]
+    pg_host = services["retriva-pg-monitor-exporter"]["environment"]["PGHOST"]
+    assert redis_host in declared
+    assert pg_host in declared
 
 
 def test_runbook_anchors_exist_for_rule_references():
@@ -308,6 +445,24 @@ def test_runbook_contains_required_sections():
         "FLUSHALL",
     ):
         assert section in text, section
+
+
+def test_runbook_uses_canonical_topology_and_dependency_safe_commands():
+    text = RUNBOOK.read_text()
+    five = (
+        "retriva-prometheus retriva-alertmanager retriva-alert-sink "
+        "retriva-redis-monitor-exporter retriva-pg-monitor-exporter"
+    )
+    # dependency-safe deploy, and monitoring-only stop/remove
+    assert f"docker compose --profile monitoring up -d --no-deps {five}" in text
+    assert f"docker compose --profile monitoring stop {five}" in text
+    assert f"docker compose --profile monitoring rm -sf {five}" in text
+    # a bare profile `down` would also remove base-profile services; the
+    # runbook must never present it as an allowed command.
+    assert "--profile monitoring down" not in text
+    assert "down" in text  # the prohibition itself is documented
+    for name in MONITORING_SERVICES:
+        assert name in text, name
 
 
 # ------------------------------------------------- promtool-based rule tests ----

@@ -5,6 +5,13 @@ Canonical owner: `retriva-local-containerized-deployment` (Compose profile
 the read-only Redis exporter, the read-only PostgreSQL collector, and the local
 alert sink. Private network only; no host ports are published.
 
+Canonical names: every hostname used by the monitoring configuration is a
+Compose service name of this repository's `docker-compose.yml`
+(`retriva-prometheus`, `retriva-alertmanager`, `retriva-alert-sink`,
+`retriva-redis-monitor-exporter`, `retriva-pg-monitor-exporter`). Short
+harness-only names (for example `alertmanager`, `alert-sink`) are never valid
+in this deployment; the committed tests reject them.
+
 Operator invariants:
 
 - The monitoring stack is read-only and unprivileged. It never administers
@@ -120,9 +127,10 @@ Covers `MonitoringCollectorScrapeDown`, `MonitoringAlertmanagerDown`,
 `MonitoringRuleEvaluationFailures`, `MonitoringConfigReloadFailed`, and
 `MonitoringStorageHighUsage`.
 
-1. Check container health: `docker compose ps prometheus alertmanager
-   redis-monitor-exporter pg-monitor-exporter alert-sink` (profile
-   `monitoring`).
+1. Check container health with the canonical service names:
+   `docker compose --profile monitoring ps retriva-prometheus
+   retriva-alertmanager retriva-redis-monitor-exporter
+   retriva-pg-monitor-exporter retriva-alert-sink`.
 2. Validate configuration before restarting: `promtool check config` for
    Prometheus and `amtool check-config` for Alertmanager (or the equivalent
    pinned commands).
@@ -149,11 +157,33 @@ credential failed.
 `MonitoringPostgresGaugeStale` (warning): `retriva_pg_nonterminal_jobs` has not
 refreshed.
 
-1. Check collector logs and the read-only role grant
-   (`GRANT SELECT ON jobs.jobs`; no other grants).
+1. Check collector logs and the read-only role grant. Under the currently
+   committed design the collector role has `CONNECT`, `USAGE` on schema
+   `jobs`, and `SELECT` on `jobs.jobs` — no other grants.
 2. Confirm the database is reachable and the query respects the statement
    timeout (`PGOPTIONS=-c statement_timeout=5000`).
-3. Restart only the `pg-monitor-exporter` service after verifying the role.
+3. Restart only the `retriva-pg-monitor-exporter` service after verifying the
+   role.
+
+**Known limitation (recorded 2026-10-09):** `jobs.jobs` carries
+`FORCE ROW LEVEL SECURITY`; without a tenant or the controlled privileged
+flag, the direct `SELECT count(*)` source observes zero rows — the gauge is
+structurally `0` even while durable non-terminal jobs exist. The correct
+source is the proposed aggregate-only interface in Spec 036 / ADR-041
+(`jobs.monitoring_nonterminal_job_count()`, `EXECUTE`-only grants). Until
+those are accepted and implemented, a monitoring deployment must not be
+declared `CLOSED_SUCCESS` while this metric is relied upon, and operators
+must treat the PostgreSQL term of `RedisQueueDisappearance` as unavailable.
+After acceptance and implementation, verification is:
+
+```sql
+-- as the monitoring login role, through psql with the session timeout
+SELECT jobs.monitoring_nonterminal_job_count();       -- correct cross-tenant count
+SELECT count(*) FROM jobs.jobs;                       -- must be denied (no table SELECT)
+```
+
+plus catalog checks that `FORCE ROW LEVEL SECURITY` is still enabled and that
+`PUBLIC` has no `EXECUTE` on the function.
 
 ## Safe evidence collection
 
@@ -211,13 +241,58 @@ path with PostgreSQL as the authority.
 - Planned maintenance that stops Redis or the collectors should be silenced
   narrowly (collector down) and unsilenced immediately afterwards.
 
+## Canonical deployment and verification commands
+
+Deployment is dependency-safe and strictly monitoring-only. Never run the
+profile without `--no-deps` while the application services are live, and
+never recreate application dependencies as part of a monitoring change.
+
+```bash
+# deploy or update the monitoring profile only
+docker compose --profile monitoring up -d --no-deps retriva-prometheus retriva-alertmanager retriva-alert-sink retriva-redis-monitor-exporter retriva-pg-monitor-exporter
+
+# stop and remove only the monitoring services (volumes preserved for evidence)
+docker compose --profile monitoring stop retriva-prometheus retriva-alertmanager retriva-alert-sink retriva-redis-monitor-exporter retriva-pg-monitor-exporter
+docker compose --profile monitoring rm -sf retriva-prometheus retriva-alertmanager retriva-alert-sink retriva-redis-monitor-exporter retriva-pg-monitor-exporter
+
+# configuration reload (lifecycle enabled)
+docker exec retriva-prometheus wget -qO- --post-data= http://127.0.0.1:9090/-/reload
+```
+
+Never run a bare profile-level `down`: base-profile services are always
+enabled and would be removed with it. Always use the explicit five-service
+stop/remove form above.
+
+Target and routing verification (canonical DNS names only):
+
+```bash
+# every scrape target must be up by canonical name
+docker exec retriva-prometheus wget -qO- http://127.0.0.1:9090/api/v1/targets
+# 16 rules in two groups, health ok
+docker exec retriva-prometheus wget -qO- http://127.0.0.1:9090/api/v1/rules
+# safe routing test: synthetic alert through the Alertmanager API, then
+# confirm delivery on the local sink and let the test alert expire
+# (POST http://retriva-alertmanager:9093/api/v2/alerts; GET
+#  http://retriva-alert-sink:9099/alerts). No external notification occurs.
+```
+
+Derived collector image policy: `retriva-pg-monitor-exporter:local` is built
+at deploy time from the committed `Dockerfile.pg-monitor` (the base tag
+`postgres:16.15-alpine` and the `apk` package revision can drift), so the
+built digest must be recorded at validation time and the monitoring
+containers must run exactly that recorded digest. Do not deploy a rebuild
+that was not validated. The same containment applies to the pinned
+Prometheus, Alertmanager, and python:3.12-alpine image digests.
+
 ## Rollback / removal
 
-- The monitoring profile is additive: `docker compose --profile monitoring
-  down` stops the monitoring services; application and Redis state are
-  untouched.
-- To remove permanently: delete the monitoring services/volumes from the
+- The monitoring profile is additive. Stop and remove only the monitoring
+  services with the explicit five-service commands in
+  [Canonical deployment and verification commands](#canonical-deployment-and-verification-commands);
+  application and Redis state are untouched.
+- To remove permanently: remove the monitoring services/volumes from the
   deployment compose and the `config/monitoring/` tree; revoke the read-only
-  PostgreSQL monitor role grant if the stack is retired.
+  PostgreSQL monitor role (currently `SELECT`-based; after Spec 036 / ADR-041
+  acceptance, revoke `EXECUTE` on the interface instead).
 - Rolling back a bad rule/config change: restore the previous committed
   revision, validate with `promtool`, and reload.

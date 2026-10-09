@@ -59,6 +59,18 @@ GRANT SELECT ON TABLE jobs.jobs TO retriva_monitor;
 
 Statement timeout is enforced via `PGOPTIONS=-c statement_timeout=5000`.
 
+Known limitation (recorded 2026-10-09, Spec 036 / ADR-041 PROPOSED):
+`jobs.jobs` enforces `FORCE ROW LEVEL SECURITY`, so without a tenant context
+the direct `SELECT count(*)` source observes zero rows and this gauge is
+structurally `0` even while durable non-terminal jobs exist. The proposed
+correction sources the metric through the migration-managed, aggregate-only
+interface `jobs.monitoring_nonterminal_job_count()` with `EXECUTE`-only
+grants (no table `SELECT`, no `BYPASSRLS`) and a dedicated non-login definer
+role. The metric name, labels, baseline, and failure semantics above do not
+change; only the `Source` and the grant template change once Spec 036 and
+ADR-041 are accepted and implemented. Do not declare a monitoring deployment
+`CLOSED_SUCCESS` while this limitation stands.
+
 ## Alert routing ledger
 
 | Alert class | Alert(s) | Severity | Route |

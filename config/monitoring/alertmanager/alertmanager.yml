@@ -22,7 +22,7 @@ route:
 receivers:
   - name: monitoring-sink
     webhook_configs:
-      - url: http://alert-sink:9099/alerts
+      - url: http://retriva-alert-sink:9099/alerts
         send_resolved: true
 
 inhibit_rules:
