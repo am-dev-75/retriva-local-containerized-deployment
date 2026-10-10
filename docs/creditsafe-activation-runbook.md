@@ -30,7 +30,11 @@ performed here.
   `retriva-local-containerized-deployment` (prepared integration branch:
   normal merge of `crm-assistant` onto the current `main` line with
   conflicts resolved to retain both sides; both histories and all
-  signed-off hashes remain intact).
+  signed-off hashes remain intact).  **Merged 2026-10-10 as PR #1**
+  (normal merge commit `f852c49`, parents `ce219cb` + `8f86eaa`);
+  deployment support is now on `main`.  The merge does not activate
+  Creditsafe — this runbook's activation stages remain separately
+  gated.
 - Suggested title:
   `Spec 037: Creditsafe deployment placeholders, acceptance harness, and activation runbook`
 - Suggested description: see §12 of this document.
