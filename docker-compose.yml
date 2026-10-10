@@ -366,6 +366,23 @@ services:
       # --- Web Research: internal SearXNG (ADR-014) ---
       CRM_SEARXNG_URL: ${CRM_SEARXNG_URL:-http://retriva-searxng:8080}
       CRM_PUBLIC_RESEARCH_PROVIDER: ${CRM_PUBLIC_RESEARCH_PROVIDER:-searxng}
+      # --- CRM Assistant: Creditsafe financial-score integration (Spec 037;
+      # ADR-042).  Placeholders only, safe by default: integration DISABLED,
+      # sandbox environment when enabled, provider budgets ZERO (fail
+      # closed), 90-day freshness, name-only search disabled.  Credentials
+      # (username/password) come from the deployment env file at deploy
+      # time and are never committed.  Live sandbox activation requires an
+      # explicit owner-authorized change to these values.
+      CRM_CREDITSAFE_ENABLED: ${CRM_CREDITSAFE_ENABLED:-false}
+      CRM_CREDITSAFE_ENVIRONMENT: ${CRM_CREDITSAFE_ENVIRONMENT:-sandbox}
+      CRM_CREDITSAFE_USERNAME: ${CRM_CREDITSAFE_USERNAME:-}
+      CRM_CREDITSAFE_PASSWORD: ${CRM_CREDITSAFE_PASSWORD:-}
+      CRM_CREDITSAFE_TIMEOUT_SECONDS: ${CRM_CREDITSAFE_TIMEOUT_SECONDS:-15}
+      CRM_CREDITSAFE_MAX_RETRIES: ${CRM_CREDITSAFE_MAX_RETRIES:-2}
+      CRM_CREDITSAFE_FRESHNESS_DAYS: ${CRM_CREDITSAFE_FRESHNESS_DAYS:-90}
+      CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH: ${CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH:-false}
+      CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH: ${CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH:-0}
+      CRM_CREDITSAFE_BUDGET_CREDIT_REPORT: ${CRM_CREDITSAFE_BUDGET_CREDIT_REPORT:-0}
       # --- Task LLM (for extensions: extraction, classification, summarization) ---
       TASK_BASE_URL: ${TASK_BASE_URL:-}
       TASK_MODEL: ${TASK_MODEL:-}
@@ -477,6 +494,23 @@ services:
       # --- Web Research: internal SearXNG (ADR-014) ---
       CRM_SEARXNG_URL: ${CRM_SEARXNG_URL:-http://retriva-searxng:8080}
       CRM_PUBLIC_RESEARCH_PROVIDER: ${CRM_PUBLIC_RESEARCH_PROVIDER:-searxng}
+      # --- CRM Assistant: Creditsafe financial-score integration (Spec 037;
+      # ADR-042).  Placeholders only, safe by default: integration DISABLED,
+      # sandbox environment when enabled, provider budgets ZERO (fail
+      # closed), 90-day freshness, name-only search disabled.  Credentials
+      # (username/password) come from the deployment env file at deploy
+      # time and are never committed.  Live sandbox activation requires an
+      # explicit owner-authorized change to these values.
+      CRM_CREDITSAFE_ENABLED: ${CRM_CREDITSAFE_ENABLED:-false}
+      CRM_CREDITSAFE_ENVIRONMENT: ${CRM_CREDITSAFE_ENVIRONMENT:-sandbox}
+      CRM_CREDITSAFE_USERNAME: ${CRM_CREDITSAFE_USERNAME:-}
+      CRM_CREDITSAFE_PASSWORD: ${CRM_CREDITSAFE_PASSWORD:-}
+      CRM_CREDITSAFE_TIMEOUT_SECONDS: ${CRM_CREDITSAFE_TIMEOUT_SECONDS:-15}
+      CRM_CREDITSAFE_MAX_RETRIES: ${CRM_CREDITSAFE_MAX_RETRIES:-2}
+      CRM_CREDITSAFE_FRESHNESS_DAYS: ${CRM_CREDITSAFE_FRESHNESS_DAYS:-90}
+      CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH: ${CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH:-false}
+      CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH: ${CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH:-0}
+      CRM_CREDITSAFE_BUDGET_CREDIT_REPORT: ${CRM_CREDITSAFE_BUDGET_CREDIT_REPORT:-0}
       # --- Session Document Processing ---
       SESSION_ATTACHMENT_MAX_SIZE: ${SESSION_ATTACHMENT_MAX_SIZE:-52428800}
       SESSION_ATTACHMENT_TTL_SECONDS: ${SESSION_ATTACHMENT_TTL_SECONDS:-86400}
@@ -572,6 +606,23 @@ services:
       # --- Web Research: internal SearXNG (ADR-014) ---
       CRM_SEARXNG_URL: ${CRM_SEARXNG_URL:-http://retriva-searxng:8080}
       CRM_PUBLIC_RESEARCH_PROVIDER: ${CRM_PUBLIC_RESEARCH_PROVIDER:-searxng}
+      # --- CRM Assistant: Creditsafe financial-score integration (Spec 037;
+      # ADR-042).  Placeholders only, safe by default: integration DISABLED,
+      # sandbox environment when enabled, provider budgets ZERO (fail
+      # closed), 90-day freshness, name-only search disabled.  Credentials
+      # (username/password) come from the deployment env file at deploy
+      # time and are never committed.  Live sandbox activation requires an
+      # explicit owner-authorized change to these values.
+      CRM_CREDITSAFE_ENABLED: ${CRM_CREDITSAFE_ENABLED:-false}
+      CRM_CREDITSAFE_ENVIRONMENT: ${CRM_CREDITSAFE_ENVIRONMENT:-sandbox}
+      CRM_CREDITSAFE_USERNAME: ${CRM_CREDITSAFE_USERNAME:-}
+      CRM_CREDITSAFE_PASSWORD: ${CRM_CREDITSAFE_PASSWORD:-}
+      CRM_CREDITSAFE_TIMEOUT_SECONDS: ${CRM_CREDITSAFE_TIMEOUT_SECONDS:-15}
+      CRM_CREDITSAFE_MAX_RETRIES: ${CRM_CREDITSAFE_MAX_RETRIES:-2}
+      CRM_CREDITSAFE_FRESHNESS_DAYS: ${CRM_CREDITSAFE_FRESHNESS_DAYS:-90}
+      CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH: ${CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH:-false}
+      CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH: ${CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH:-0}
+      CRM_CREDITSAFE_BUDGET_CREDIT_REPORT: ${CRM_CREDITSAFE_BUDGET_CREDIT_REPORT:-0}
       # --- Session Document Processing ---
       SESSION_ATTACHMENT_MAX_SIZE: ${SESSION_ATTACHMENT_MAX_SIZE:-52428800}
       SESSION_ATTACHMENT_TTL_SECONDS: ${SESSION_ATTACHMENT_TTL_SECONDS:-86400}
