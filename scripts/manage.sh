@@ -305,7 +305,7 @@ case "$COMMAND" in
     echo "Qdrant:  http://localhost:${QDRANT_HTTP_PORT:-6333}/dashboard"
     curl -fsS "http://localhost:${QDRANT_HTTP_PORT:-6333}/" >/dev/null && echo "OK qdrant" || echo "FAIL qdrant"
     curl -fsS "http://localhost:${TIKA_PORT:-9998}/tika" >/dev/null && echo "OK tika" || echo "FAIL tika"
-    curl -fsS "http://localhost:${GATEWAY_PORT:-8002}/gateway/health" && echo "OK gateway" || echo "WARN gateway health endpoint failed"
+    curl -fsS "http://localhost:${GATEWAY_PORT:-8002}/gateway/health" >/dev/null && echo "OK gateway" || echo "WARN gateway health endpoint failed"
     echo "WebUI:   http://localhost:${WEBUI_PORT:-5173}"
     ;;
 
