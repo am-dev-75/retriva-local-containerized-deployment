@@ -26,7 +26,11 @@ The deployment repository's `main` (release line, currently `ce219cb`
 fast-forward merge is not possible. Direct merges to `main` are not
 performed here.
 
-- PR: `crm-assistant` → `main` in `retriva-local-containerized-deployment`.
+- PR: `integrate/spec037-creditsafe-deployment` → `main` in
+  `retriva-local-containerized-deployment` (prepared integration branch:
+  normal merge of `crm-assistant` onto the current `main` line with
+  conflicts resolved to retain both sides; both histories and all
+  signed-off hashes remain intact).
 - Suggested title:
   `Spec 037: Creditsafe deployment placeholders, acceptance harness, and activation runbook`
 - Suggested description: see §12 of this document.
