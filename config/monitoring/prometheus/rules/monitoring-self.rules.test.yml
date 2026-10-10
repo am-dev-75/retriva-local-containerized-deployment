@@ -1,0 +1,133 @@
+# Spec 035 / ADR-040 — promtool unit tests for the self-monitoring rules.
+rule_files:
+  - monitoring-self.rules.yml
+evaluation_interval: 1m
+tests:
+  - name: self-healthy-no-fire
+    interval: 1m
+    input_series:
+      - series: 'up{job="redis-monitor"}'
+        values: '1x40'
+      - series: 'up{job="pg-monitor"}'
+        values: '1x40'
+      - series: 'up{job="alertmanager"}'
+        values: '1x40'
+      - series: 'prometheus_rule_evaluation_failures_total'
+        values: '0x40'
+      - series: 'redis_monitor_exporter_auth_failures_total'
+        values: '0x40'
+      - series: 'retriva_pg_monitor_last_success_timestamp_seconds'
+        values: '1000000000x40'
+      - series: 'prometheus_config_last_reload_successful'
+        values: '1x40'
+      - series: 'prometheus_tsdb_storage_blocks_bytes'
+        values: '1048576x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MonitoringCollectorScrapeDown
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: MonitoringRuleEvaluationFailures
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: MonitoringAlertmanagerDown
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: MonitoringRedisExporterAuthFailures
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: MonitoringConfigReloadFailed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: MonitoringStorageHighUsage
+        exp_alerts: []
+  - name: collector-scrape-down-fires
+    interval: 1m
+    input_series:
+      - series: 'up{job="redis-monitor"}'
+        values: '1x4 0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MonitoringCollectorScrapeDown
+        exp_alerts:
+          - exp_labels:
+              job: redis-monitor
+              severity: critical
+              service: monitoring
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Monitoring collector scrape is down"
+              description: "Prometheus cannot scrape a monitoring collector; security or correlation signals may be missing."
+              runbook: "docs/monitoring-runbook.md#monitoring-stack-unavailable"
+      - eval_time: 40m
+        alertname: MonitoringCollectorScrapeDown
+        exp_alerts: []
+  - name: alertmanager-down-fires
+    interval: 1m
+    input_series:
+      - series: 'up{job="alertmanager"}'
+        values: '1x4 0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MonitoringAlertmanagerDown
+        exp_alerts:
+          - exp_labels:
+              job: alertmanager
+              severity: critical
+              service: monitoring
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Alertmanager unreachable"
+              description: "Prometheus cannot scrape Alertmanager; notification routing may be unavailable."
+              runbook: "docs/monitoring-runbook.md#monitoring-stack-unavailable"
+  - name: redis-exporter-auth-failures-fire
+    interval: 1m
+    input_series:
+      - series: 'redis_monitor_exporter_auth_failures_total'
+        values: '0 1x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MonitoringRedisExporterAuthFailures
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: monitoring
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Redis exporter authentication failures"
+              description: "The read-only rtrv-monitor credential failed; Redis security signals are blind until fixed."
+              runbook: "docs/monitoring-runbook.md#redis-exporter-authentication-failure"
+  - name: pg-gauge-stale-fires
+    interval: 1m
+    input_series:
+      - series: 'retriva_pg_monitor_last_success_timestamp_seconds'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MonitoringPostgresGaugeStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: monitoring
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "PostgreSQL durable-job gauge is stale"
+              description: "The durable-job gauge has not refreshed; Redis/queue correlation signals are degraded."
+              runbook: "docs/monitoring-runbook.md#postgres-gauge-collector-failure"
+  - name: config-reload-failed-fires
+    interval: 1m
+    input_series:
+      - series: 'prometheus_config_last_reload_successful'
+        values: '1x4 0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MonitoringConfigReloadFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: monitoring
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Prometheus configuration reload failed"
+              description: "The last configuration reload failed; the running configuration may be stale."
+              runbook: "docs/monitoring-runbook.md#monitoring-stack-unavailable"

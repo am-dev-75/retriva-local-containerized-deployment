@@ -1,0 +1,55 @@
+# Spec 034 / ADR-039 — proposed Redis hardening alert rules.
+#
+# Deployment ownership: monitoring stack (not deployed with this change).
+# This file defines the required alert interface; wire it to the metrics
+# source that collects the Redis ACL log and keyspace aggregates through the
+# rtrv-monitor identity (aggregates only; no payload retrieval).
+groups:
+  - name: retriva-redis-acl-hardening
+    rules:
+      - alert: RedisDeniedDestructiveCommand
+        expr: increase(redis_acl_denied_commands_total{category="destructive"}[10m]) > 0
+        labels: {severity: critical, service: redis}
+        annotations:
+          summary: "Destructive Redis command denied by ACL"
+          runbook: "docs/redis-acl-runbook.md#denied-command-alert-response"
+      - alert: RedisAuthFailuresAboveBaseline
+        expr: increase(redis_auth_failures_total[15m]) > 5
+        labels: {severity: warning, service: redis}
+        annotations:
+          summary: "Authentication failures above baseline"
+      - alert: RedisTotalKeyCollapse
+        expr: redis_db_keys_total < 0.2 * redis_db_keys_total_baseline
+        labels: {severity: critical, service: redis}
+        annotations:
+          summary: "Sudden total key-count collapse"
+      - alert: RedisQueueDisappearance
+        expr: redis_key_exists{key="ingestion"} == 0 and on() (retriva_pg_nonterminal_jobs > 0)
+        labels: {severity: critical, service: redis}
+        annotations:
+          summary: "Ingestion queue absent while durable non-terminal work exists"
+      - alert: RedisBindingRecreationSpike
+        expr: increase(redis_binding_recreation_events_total[10m]) > 20
+        labels: {severity: warning, service: redis}
+        annotations:
+          summary: "Binding recreation spike"
+      - alert: RedisResultRecordCollapse
+        expr: redis_result_records_total < 0.2 * redis_result_records_total_baseline
+        labels: {severity: critical, service: redis}
+        annotations:
+          summary: "Unusual result-record collapse"
+      - alert: RedisRestartOrPersistenceAnomaly
+        expr: redis_rdb_last_bgsave_status != 1
+        labels: {severity: warning, service: redis}
+        annotations:
+          summary: "Redis restart or persistence anomaly"
+      - alert: RedisEmergencyIdentityUse
+        expr: increase(redis_acl_emergency_use_total[5m]) > 0
+        labels: {severity: critical, service: redis}
+        annotations:
+          summary: "Emergency identity activated; confirm owner approval"
+      - alert: RedisDefaultOrNopassAuthSuccess
+        expr: increase(redis_acl_default_auth_success_total[5m]) > 0
+        labels: {severity: critical, service: redis}
+        annotations:
+          summary: "Default/nopass authentication succeeded; hardening regression"

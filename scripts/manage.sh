@@ -88,13 +88,64 @@ _auto_exclude_disabled_connectors() {
     EXCLUDED_SERVICES+=("retriva-email-agent-connector")
   fi
 
-  # Messaging Extension (retriva-messaging, apprise-api, retriva-messaging-db)
+  # Messaging Extension (retriva-messaging, apprise-api, and its
+  # shared-database one-shots; the retired retriva-messaging-db service
+  # is gone — messaging uses the shared retriva-postgres).
   local msg_enabled
   msg_enabled=$(grep -E '^RETRIVA_MESSAGING_ENABLED=' "$ENV_FILE" 2>/dev/null | cut -d '=' -f 2- | tr -d '[:space:]' || true)
   if [[ "$msg_enabled" != "on" ]]; then
     EXCLUDED_SERVICES+=("retriva-messaging")
     EXCLUDED_SERVICES+=("apprise-api")
-    EXCLUDED_SERVICES+=("retriva-messaging-db")
+    EXCLUDED_SERVICES+=("retriva-pg-messaging-bootstrap")
+    EXCLUDED_SERVICES+=("retriva-pg-messaging-migrate")
+  fi
+}
+
+# Shared PostgreSQL platform (mandatory for every deployment): fail
+# fast when the platform credentials are not configured (value or
+# mounted secret file) in the .env file.
+_require_pg_env() {
+  require_env
+  _require_env_values RETRIVA_PG_ADMIN_PASSWORD RETRIVA_PG_MIGRATOR_PASSWORD RETRIVA_PG_CORE_PASSWORD
+}
+
+# CRM Assistant extension roles + pgAdmin UI: required by the Pro
+# stack ("pro"/"db" profiles).
+_require_crm_env() {
+  require_env
+  _require_env_values \
+    CRM_PG_APPLICATION_PASSWORD CRM_PG_IMPORTER_PASSWORD \
+    CRM_PG_READONLY_PASSWORD CRM_PGADMIN_UI_OPERATOR_PASSWORD \
+    RETRIVA_PGADMIN_UI_PASSWORD
+}
+
+# Messaging extension runtime identity (shared database, Pro-owned
+# messaging schema).
+_require_messaging_env() {
+  require_env
+  _require_env_values RETRIVA_MESSAGING_DB_PASSWORD
+}
+
+_require_env_values() {
+  require_env
+  local missing=()
+  local value file_var file_value
+  for var in "$@"; do
+    value=$(grep -E "^${var}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d '=' -f 2- | tr -d '[:space:]' || true)
+    file_var="${var}_FILE"
+    file_value=""
+    if [[ -n "$file_var" ]]; then
+      file_value=$(grep -E "^${file_var}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d '=' -f 2- | tr -d '[:space:]' || true)
+    fi
+    if [[ -z "$value" && -z "$file_value" ]]; then
+      missing+=("$var")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "ERROR: the following variables must be set (value or _FILE) in $ENV_FILE before starting this stack:" >&2
+    printf '       %s\n' "${missing[@]}" >&2
+    echo "Generate local secrets with: python -c 'import secrets; print(secrets.token_urlsafe(32))'" >&2
+    exit 1
   fi
 }
 
@@ -130,7 +181,7 @@ case "$COMMAND" in
 
   build)
     require_env
-    SERVICES="qdrant redis tika whisper retriva-ingestion retriva-worker retriva-core retriva-gateway retriva-webui"
+    SERVICES="qdrant redis tika whisper retriva-searxng retriva-ingestion retriva-worker retriva-core retriva-gateway retriva-webui"
     if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
       for ex in "${EXCLUDED_SERVICES[@]}"; do
         SERVICES=$(echo "$SERVICES" | tr ' ' '\n' | grep -v "^${ex}$" | tr '\n' ' ' || true)
@@ -158,8 +209,11 @@ case "$COMMAND" in
     ;;
 
   up)
-    require_env
-    SERVICES="qdrant redis tika whisper retriva-ingestion retriva-worker retriva-core retriva-gateway retriva-webui"
+    # Core-only deployment: the shared PostgreSQL lifecycle (postgres,
+    # platform bootstrap, Core migrations) is mandatory and always
+    # starts with the stack; no Pro package is required.
+    _require_pg_env
+    SERVICES="retriva-postgres retriva-pg-bootstrap retriva-pg-migrate qdrant redis tika whisper retriva-searxng retriva-ingestion retriva-worker retriva-core retriva-gateway retriva-webui"
     if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
       for ex in "${EXCLUDED_SERVICES[@]}"; do
         SERVICES=$(echo "$SERVICES" | tr ' ' '\n' | grep -v "^${ex}$" | tr '\n' ' ' || true)
@@ -169,7 +223,8 @@ case "$COMMAND" in
     ;;
 
   up-with-connectors)
-    require_env
+    _require_pg_env
+    _require_crm_env
     if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
       SERVICES=$(compose --profile connectors config --services)
       for ex in "${EXCLUDED_SERVICES[@]}"; do
@@ -183,7 +238,8 @@ case "$COMMAND" in
     ;;
 
   up-pro)
-    require_env
+    _require_pg_env
+    _require_crm_env
     if [[ ${#EXCLUDED_SERVICES[@]} -gt 0 ]]; then
       SERVICES=$(compose --profile pro config --services)
       for ex in "${EXCLUDED_SERVICES[@]}"; do
@@ -251,6 +307,115 @@ case "$COMMAND" in
   connector-shell)
     require_env
     compose --profile pro run --rm retriva-mediawiki-connector bash
+    ;;
+
+  db-up)
+    # PostgreSQL is mandatory for every deployment; this command
+    # additionally starts the pgAdmin operator view ("db" profile).
+    _require_pg_env
+    _require_env_values RETRIVA_PGADMIN_UI_PASSWORD
+    compose --profile db up -d retriva-postgres retriva-pg-bootstrap retriva-pg-migrate retriva-pgadmin
+    echo
+    echo "PostgreSQL stack up. pgAdmin: http://${RETRIVA_PGADMIN_BIND_ADDR:-127.0.0.1}:${RETRIVA_PGADMIN_PORT:-5050}"
+    echo "Connect pgAdmin to host 'retriva-postgres' (internal network, port 5432)"
+    echo "using the retriva_pgadmin_operator role (provisioned by the Pro stack)."
+    echo "Note: the pgAdmin UI credentials apply on the FIRST initialization"
+    echo "of the retriva_pgadmin_data volume only."
+    echo "PostgreSQL itself is no longer profile-gated: every 'up' starts it."
+    ;;
+
+  db-down)
+    # Stop ONLY the pgAdmin operator view; the shared PostgreSQL service
+    # belongs to the core deployment and is never taken down here.
+    require_env
+    compose --profile pgadmin stop retriva-pgadmin
+    ;;
+
+  db-migrate)
+    # Controlled migration step: Core platform stream always; CRM
+    # stream additionally when the Pro CRM Assistant store is enabled.
+    _require_pg_env
+    compose run --rm retriva-pg-migrate
+    if grep -qE '^CRM_PG_ENABLED=true' "$ENV_FILE" 2>/dev/null; then
+      _require_crm_env
+      compose --profile pro run --rm retriva-pg-crm-migrate
+    else
+      echo "CRM_PG_ENABLED is not true: Core platform migrations only."
+    fi
+    ;;
+
+  db-status)
+    _require_pg_env
+    compose run --rm retriva-pg-migrate python -m retriva.infrastructure.postgres.migrate status
+    if grep -qE '^CRM_PG_ENABLED=true' "$ENV_FILE" 2>/dev/null; then
+      compose --profile pro run --rm retriva-pg-crm-migrate python -m retriva_crm_assistant.postgres.migrate status
+    fi
+    ;;
+
+  db-verify)
+    _require_pg_env
+    compose run --rm retriva-pg-migrate python -m retriva.infrastructure.postgres.migrate verify
+    if grep -qE '^CRM_PG_ENABLED=true' "$ENV_FILE" 2>/dev/null; then
+      _require_crm_env
+      compose --profile pro run --rm retriva-pg-crm-migrate python -m retriva_crm_assistant.postgres.migrate verify
+    fi
+    ;;
+
+  db-readiness)
+    _require_pg_env
+    compose run --rm retriva-pg-migrate python -m retriva.infrastructure.postgres.migrate readiness
+    if grep -qE '^CRM_PG_ENABLED=true' "$ENV_FILE" 2>/dev/null; then
+      _require_crm_env
+      compose --profile pro run --rm retriva-pg-crm-migrate python -m retriva_crm_assistant.postgres.migrate readiness
+    fi
+    ;;
+
+  jobs-reconcile)
+    # Operator CLI: durable-jobs reconciliation (R1-R9).  Dry-run by
+    # default; pass --apply to perform the classified actions.  Scope:
+    # --tenant <id> or --all-tenants (exit codes: 0 clean, 3 applied,
+    # 4 manual-review pending, 1 failure).  Runs in the worker image
+    # with the Core runtime identity (PostgreSQL is the authoritative
+    # job store; Spec 025 / ADR-030).
+    _require_pg_env
+    compose run --rm --no-deps retriva-worker \
+      python -m retriva.jobs.reconcile "$@"
+    ;;
+
+  jobs-cleanup)
+    # Operator CLI: retention purge of expired terminal jobs
+    # (succeeded 30d / failed+cancelled 90d; manual_review is never
+    # removed).  Dry-run by default; pass --apply to purge.
+    _require_pg_env
+    compose run --rm --no-deps retriva-worker \
+      python -m retriva.jobs.cleanup "$@"
+    ;;
+
+  db-messaging-bootstrap)
+    _require_pg_env
+    _require_messaging_env
+    compose --profile messaging --profile pro run --rm retriva-pg-messaging-bootstrap
+    ;;
+
+  db-messaging-migrate)
+    _require_pg_env
+    compose --profile messaging --profile pro run --rm retriva-pg-messaging-migrate
+    ;;
+
+  db-psql)
+    require_env
+    docker exec -it retriva-postgres psql \
+      -U "$(grep -E '^RETRIVA_PG_ADMIN_USER=' "$ENV_FILE" | cut -d '=' -f 2- || echo retriva_admin)" \
+      -d "$(grep -E '^RETRIVA_PG_DATABASE=' "$ENV_FILE" | cut -d '=' -f 2- || echo retriva)"
+    ;;
+
+  db-logs)
+    require_env
+    if [[ $# -eq 0 ]]; then
+      docker logs retriva-postgres
+    else
+      docker logs "$@"
+    fi
     ;;
 
   connector-validate)
@@ -326,7 +491,10 @@ Commands:
   check               Check Docker/Compose and repository paths
   build               Build local Retriva images
   build-pro           Build core images plus all Retriva Pro profile services
-  up                  Start qdrant, tika, core, gateway, webui
+  up                  Start the Core-only stack (qdrant, tika, core,
+                      gateway, webui) INCLUDING the mandatory shared
+                      PostgreSQL lifecycle (postgres -> bootstrap ->
+                      Core migrations); no Pro package required
   up-with-connectors  Start all services including connector profile (alias for up-pro)
   up-pro              Start all services including Retriva Pro extensions
   down                Stop services
@@ -339,6 +507,32 @@ Commands:
   connector-shell     Open shell in MediaWiki connector container (alias: pro-shell)
   connector-validate  Run connector validate command (alias: pro-validate)
   connector-sync      Run connector sync command (alias: pro-sync)
+  db-up               Additionally start the pgAdmin operator view
+                      ("db"/"pgadmin" profiles); PostgreSQL itself is
+                      already mandatory in every deployment
+  db-down             Stop ONLY the pgAdmin view (the shared PostgreSQL
+                      service stays; it belongs to the core stack)
+  db-migrate          Apply pending migrations (Core platform always;
+                      pro.crm additionally when CRM_PG_ENABLED=true)
+  db-status           Show the migration ledger and pending state
+  db-verify           Verify framework + CRM RLS/role invariants
+  db-readiness        PostgreSQL readiness report (no credentials)
+  jobs-reconcile [args]
+                      Durable-jobs reconciliation (R1-R9); dry-run by
+                      default, --apply to perform; scope --tenant <id>
+                      or --all-tenants; exit 0 clean / 3 applied /
+                      4 manual-review / 1 failure
+  jobs-cleanup [args] Retention purge of expired terminal jobs
+                      (dry-run by default, --apply to purge);
+                      manual_review jobs are never removed
+  db-psql             Open psql inside retriva-postgres (local trust socket)
+  db-logs             Show PostgreSQL container logs (docker logs args)
+  db-messaging-bootstrap
+                      Provision the Messaging runtime role + messaging
+                      schema on the shared database (Pro, one-shot)
+  db-messaging-migrate
+                      Apply the Messaging Alembic stream to the shared
+                      database's messaging schema (Pro, one-shot)
   email-shell         Open shell in Email Agent connector container
   email-validate      Run Email Agent connector validate command
   email-run            Start Email Agent connector (SMTP server)

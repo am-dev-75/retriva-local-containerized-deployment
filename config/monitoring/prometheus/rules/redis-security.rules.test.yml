@@ -1,0 +1,260 @@
+# Spec 035 / ADR-040 — promtool unit tests for the committed Redis security
+# rules. Synthetic series only; no production data; no secrets.
+#
+# 15 test entries covering the six accepted classes (A1…A6) plus the accepted
+# persistence rule: healthy baseline no-fire, firing with exact labels and
+# annotations, and recovery resolution.
+rule_files:
+  - redis-security.rules.yml
+evaluation_interval: 1m
+tests:
+  - name: A1-denied-destructive
+    interval: 1m
+    input_series:
+      - series: 'redis_acl_denied_commands_total{category="destructive",role="rtrv-broker"}'
+        values: '0x4 1x30'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RedisDeniedDestructiveCommand
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: RedisDeniedDestructiveCommand
+        exp_alerts:
+          - exp_labels:
+              category: destructive
+              role: rtrv-broker
+              severity: critical
+              service: redis
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Destructive Redis command denied by ACL"
+              description: "A normal identity attempted a denied destructive/admin command; treat as a potential security incident."
+              runbook: "docs/monitoring-runbook.md#destructive-command-denial-alert"
+      - eval_time: 20m
+        alertname: RedisDeniedDestructiveCommand
+        exp_alerts: []
+  - name: A2-auth-failures
+    interval: 1m
+    input_series:
+      - series: 'redis_auth_failures_total'
+        values: '0x2 1 2 3 4 5 6 7 7x40'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RedisAuthFailuresAboveBaseline
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: RedisAuthFailuresAboveBaseline
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: redis
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Redis authentication failures above baseline"
+              description: "More than five failed authentications in 15 minutes; identify the client class without logging credentials."
+              runbook: "docs/monitoring-runbook.md#authentication-failure-alert"
+      - eval_time: 30m
+        alertname: RedisAuthFailuresAboveBaseline
+        exp_alerts: []
+  - name: A3a-total-key-collapse
+    interval: 1m
+    input_series:
+      - series: 'redis_db_keys_total'
+        values: '100x70 5x15 100x20'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: RedisTotalKeyCollapse
+        exp_alerts: []
+      - eval_time: 80m
+        alertname: RedisTotalKeyCollapse
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: redis
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Sudden Redis total key-count collapse"
+              description: "Total keys fell below 20% of the recent baseline; check for flush-like or mass-deletion behaviour and correlate with durable state."
+              runbook: "docs/monitoring-runbook.md#key-queue-unacked-disappearance-alert"
+      - eval_time: 95m
+        alertname: RedisTotalKeyCollapse
+        exp_alerts: []
+  - name: A3a-total-key-collapse-small-baseline-never-fires
+    interval: 1m
+    input_series:
+      - series: 'redis_db_keys_total'
+        values: '4x30 1x30'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: RedisTotalKeyCollapse
+        exp_alerts: []
+  - name: A3b-queue-disappearance
+    interval: 1m
+    input_series:
+      - series: 'redis_key_exists{key="ingestion"}'
+        values: '0x40'
+      - series: 'retriva_pg_nonterminal_jobs'
+        values: '2x20 0x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: RedisQueueDisappearance
+        exp_alerts:
+          - exp_labels:
+              key: ingestion
+              severity: critical
+              service: redis
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Ingestion queue absent while durable non-terminal work exists"
+              description: "The broker queue key is missing while PostgreSQL reports non-terminal jobs; check for reset or queue loss."
+              runbook: "docs/monitoring-runbook.md#key-queue-unacked-disappearance-alert"
+      - eval_time: 25m
+        alertname: RedisQueueDisappearance
+        exp_alerts: []
+  - name: A3b-queue-absent-idle-never-fires
+    interval: 1m
+    input_series:
+      - series: 'redis_key_exists{key="ingestion"}'
+        values: '0x40'
+      - series: 'retriva_pg_nonterminal_jobs'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: RedisQueueDisappearance
+        exp_alerts: []
+  - name: A4-binding-recreation-spike
+    interval: 1m
+    input_series:
+      - series: 'redis_binding_recreation_events_total'
+        values: '0x5 3 6 9 12 15 18 21 24 24x40'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: RedisBindingRecreationSpike
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: RedisBindingRecreationSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: redis
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Kombu binding recreation spike"
+              description: "Unusual _kombu.binding/pidbox/fanout recreation rate; indicates Redis reset, restart, or topology churn."
+              runbook: "docs/monitoring-runbook.md#binding-recreation-spike"
+      - eval_time: 35m
+        alertname: RedisBindingRecreationSpike
+        exp_alerts: []
+  - name: A5-result-record-collapse
+    interval: 1m
+    input_series:
+      - series: 'redis_result_records_total'
+        values: '100x70 5x20 100x25'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: RedisResultRecordCollapse
+        exp_alerts: []
+      - eval_time: 85m
+        alertname: RedisResultRecordCollapse
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: redis
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Unusual Redis result-record collapse"
+              description: "Result-backend records fell below 20% of the recent baseline beyond normal TTL behaviour; correlate with task activity."
+              runbook: "docs/monitoring-runbook.md#result-record-collapse"
+      - eval_time: 100m
+        alertname: RedisResultRecordCollapse
+        exp_alerts: []
+  - name: A6a-emergency-identity-use-fire
+    interval: 1m
+    input_series:
+      - series: 'redis_acl_emergency_use_total'
+        values: '0 1x40'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: RedisEmergencyIdentityUse
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: redis
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Emergency Redis identity used"
+              description: "The break-glass identity was used; confirm owner approval and audit the session."
+              runbook: "docs/monitoring-runbook.md#emergency-default-identity-alert"
+  - name: A6a-emergency-identity-use-resolves
+    interval: 1m
+    input_series:
+      - series: 'redis_acl_emergency_use_total'
+        values: '0 1x40'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: RedisEmergencyIdentityUse
+        exp_alerts: []
+  - name: A6a-emergency-identity-idle-never-fires
+    interval: 1m
+    input_series:
+      - series: 'redis_acl_emergency_use_total'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: RedisEmergencyIdentityUse
+        exp_alerts: []
+  - name: A6b-default-nopass-fire
+    interval: 1m
+    input_series:
+      - series: 'redis_acl_default_auth_success_total'
+        values: '0 1x40'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: RedisDefaultOrNopassAuthSuccess
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: redis
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Default/nopass Redis authentication succeeded"
+              description: "A default or nopass authentication succeeded; the deny-by-default posture has regressed."
+              runbook: "docs/monitoring-runbook.md#emergency-default-identity-alert"
+  - name: A6b-default-nopass-resolves
+    interval: 1m
+    input_series:
+      - series: 'redis_acl_default_auth_success_total'
+        values: '0 1x40'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: RedisDefaultOrNopassAuthSuccess
+        exp_alerts: []
+  - name: persistence-anomaly-fire
+    interval: 1m
+    input_series:
+      - series: 'redis_rdb_last_bgsave_status'
+        values: '1x10 0x30 1x25'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: RedisRestartOrPersistenceAnomaly
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: RedisRestartOrPersistenceAnomaly
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: redis
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Redis persistence anomaly"
+              description: "Last RDB background save did not succeed; investigate persistence and disk health."
+              runbook: "docs/monitoring-runbook.md#persistence-anomaly"
+  - name: persistence-anomaly-resolves
+    interval: 1m
+    input_series:
+      - series: 'redis_rdb_last_bgsave_status'
+        values: '1x10 0x30 1x25'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: RedisRestartOrPersistenceAnomaly
+        exp_alerts: []

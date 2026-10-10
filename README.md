@@ -121,11 +121,15 @@ multi-channel notifications. It is a Retriva Pro extension licensed under the
 Retriva Pro Proprietary Commercial License Agreement (see
 `../retriva-messaging-extension/LICENSE.retriva-pro`).
 
-When enabled, `up-pro` starts three additional services:
+When enabled, `up-pro` starts the Messaging services on the **shared
+Retriva PostgreSQL instance** (`retriva-postgres`) and the common
+`retriva` database, in the Pro-owned `messaging` schema (Spec 024;
+ADR-029 — the retired dedicated database service is gone):
 
 | Service | Container | Description |
 |---|---|---|
-| `retriva-messaging-db` | `retriva-messaging-db` | PostgreSQL (dedicated database) |
+| `retriva-pg-messaging-bootstrap` | `retriva-pg-messaging-bootstrap` | one-shot: `retriva_messaging` runtime role + `messaging` schema grants |
+| `retriva-pg-messaging-migrate` | `retriva-pg-messaging-migrate` | one-shot: Alembic stream into the `messaging` schema (migrator identity) |
 | `apprise-api` | `retriva-apprise-api` | Apprise API server (delivery adapter) |
 | `retriva-messaging` | `retriva-messaging` | Messaging API + worker |
 
@@ -144,6 +148,24 @@ excluded from `up-pro` and `build-pro`, so the base deployment is unaffected.
 
 See `../retriva-messaging-extension/README.md` for the full API reference,
 configuration, and architectural boundaries.
+
+## Creditsafe financial-score integration (Spec 037)
+
+The CRM Assistant can enrich companies with a Creditsafe financial
+score and enforce a deterministic qualification gate. It is **disabled
+by default** (sandbox environment selection, zero company-search and
+credit-report budgets, name-only search off, no credentials) and has
+**not** been live-validated; production activation requires separate
+owner authorization.
+
+- Activation, credential, migration, observability, and rollback
+  procedures: `docs/creditsafe-activation-runbook.md`.
+- Static safe-defaults check: `scripts/check_creditsafe_defaults.sh`.
+- Application/operator documentation:
+  `../retriva-crm-assistant/docs/creditsafe-financial-score.md`.
+
+Merging this configuration changes nothing until the integration is
+explicitly enabled and budgets are raised under an authorized change.
 
 ## Authentication
 
@@ -241,6 +263,37 @@ Example, start all Pro services except the MediaWiki connector:
 ./scripts/manage.sh purge
 ```
 
+## Durable job operations (operator CLI)
+
+Ingestion jobs (v2 documents, MediaWiki exports, uploads) run on the
+durable job lifecycle: PostgreSQL is the authoritative logical job
+store; Celery/Redis is only the transport. History survives broker
+loss, and interrupted/ambiguous dispatches are resolved by the
+operator reconciliation CLI — not by application endpoints. There is
+intentionally NO public retry route on the job surface: retries are an
+operator action.
+
+```bash
+# Classify and resolve stuck/ambiguous jobs (dry-run by default):
+./scripts/manage.sh jobs-reconcile --tenant default            # report only
+./scripts/manage.sh jobs-reconcile --all-tenants --apply       # perform
+
+# Retention purge of expired terminal jobs (dry-run by default):
+./scripts/manage.sh jobs-cleanup --tenant default
+./scripts/manage.sh jobs-cleanup --all-tenants --apply
+```
+
+Exit codes: `0` clean / `3` actions applied / `4` manual-review jobs
+pending operator resolution / `1` failure. Jobs land in
+`manual_review` only through the bounded anomaly classification
+(ADR-030); they are resolved by a database administrator with the
+`python -m retriva.jobs.retry` CLI, never from the public API.
+
+Configuration lives in `.env` (`RETRIVA_JOBS_*`, see
+`.env.example`); `RETRIVA_JOBS_DEFAULT_TENANT` is MANDATORY — the
+ingestion API refuses to start without it, and ordinary request input
+never selects a tenant.
+
 ## Overriding Settings Globally
 
 You can override any application setting (such as `RETRIVA_DEFAULT_COLLECTION`, port numbers, or API keys) by editing your `.env` file. 
@@ -263,6 +316,52 @@ MEDIAWIKI_CONNECTOR_SYNC_INTERVAL_MINUTES=30
 MEDIAWIKI_CONNECTOR_TARGET_KB_ID=my_custom_kb
 ```
 Note: Secrets (like `MEDIAWIKI_BOT_PASSWORD`) don't require this prefix and use their standard names.
+
+### Local-development MediaWiki (`mediawiki-local`)
+
+The MediaWiki connector expects a source wiki. For self-contained local
+development this deployment provides a private, persistent MediaWiki service,
+`mediawiki-local`, that matches the connector's default endpoint
+`http://mediawiki-local:80/api.php`:
+
+- `mediawiki-local` — MediaWiki 1.43 LTS (`MEDIAWIKI_LOCAL_IMAGE`, default
+  `mediawiki:1.43.11`), reachable only on the internal `retriva-local-net`
+  network and **not published on any host port**.
+- `mediawiki-local-db` — MariaDB 11.4 LTS (`MEDIAWIKI_LOCAL_DB_IMAGE`, default
+  `mariadb:11.4`), with an isolated data volume. It is **not** the Retriva
+  centralized PostgreSQL store.
+
+Both services belong to the `pro` and `connectors` profiles, so
+`./scripts/manage.sh up-pro` starts them together with the connector, and the
+connector waits for `mediawiki-local` to become healthy before starting. To
+point the connector at an external wiki instead, set
+`MEDIAWIKI_CONNECTOR_API_URL` to that wiki's `api.php` and do not start the
+local wiki.
+
+Initialization is automatic on first start: the container installs MediaWiki
+into the persistent `mediawiki_local_config` volume using the synthetic
+credentials from `MEDIAWIKI_LOCAL_*` in `.env` (gitignored), then symlinks
+`LocalSettings.php` into the web root. No secret is written to the repository.
+The database is stored in the persistent `mediawiki_local_db_data` volume.
+Anonymous editing is disabled by default.
+
+To create a synthetic validation page (after the wiki is healthy), use the CLI
+installer's maintenance script, which does not require exposing credentials:
+
+```bash
+docker exec mediawiki-local php maintenance/edit.php -s "synthetic validation" \
+  "Retriva Local Connector Test Page" < page.wiki
+```
+
+Cleanup and rollback (removes only the local wiki dependency; preserves the
+connector state volume `mediawiki_connector_state`):
+
+```bash
+docker compose -p cust_0007 --env-file .env -f docker-compose.yml \
+  --profile connectors rm -sf mediawiki-local mediawiki-local-db
+# Persistent volumes are preserved; delete explicitly only if intentional:
+#   docker volume rm cust_0007_mediawiki_local_config cust_0007_mediawiki_local_db_data
+```
 
 ### Multiple MediaWiki Instances
 

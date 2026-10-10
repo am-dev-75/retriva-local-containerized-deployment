@@ -1,0 +1,108 @@
+# Spec 035 / ADR-040 — Redis security and availability alert rules.
+#
+# Committed from the promtool-validated Spec 034 translation
+# (`redis-monitoring-rules.translation.yml`); only the runbook references were
+# updated to the now-existing sections of docs/monitoring-runbook.md. The
+# expressions, labels, severities and `for` durations are unchanged.
+groups:
+  - name: retriva-redis-acl-hardening
+    rules:
+      - alert: RedisDeniedDestructiveCommand
+        expr: increase(redis_acl_denied_commands_total{category="destructive"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Destructive Redis command denied by ACL"
+          description: "A normal identity attempted a denied destructive/admin command; treat as a potential security incident."
+          runbook: "docs/monitoring-runbook.md#destructive-command-denial-alert"
+      - alert: RedisAuthFailuresAboveBaseline
+        expr: increase(redis_auth_failures_total[15m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Redis authentication failures above baseline"
+          description: "More than five failed authentications in 15 minutes; identify the client class without logging credentials."
+          runbook: "docs/monitoring-runbook.md#authentication-failure-alert"
+      - alert: RedisTotalKeyCollapse
+        expr: (redis_db_keys_total < 0.2 * max_over_time(redis_db_keys_total[1h] offset 10m)) and (max_over_time(redis_db_keys_total[1h] offset 10m) > 10)
+        for: 5m
+        labels:
+          severity: critical
+          service: redis
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Sudden Redis total key-count collapse"
+          description: "Total keys fell below 20% of the recent baseline; check for flush-like or mass-deletion behaviour and correlate with durable state."
+          runbook: "docs/monitoring-runbook.md#key-queue-unacked-disappearance-alert"
+      - alert: RedisQueueDisappearance
+        expr: redis_key_exists{key="ingestion"} == 0 and on() (retriva_pg_nonterminal_jobs > 0)
+        for: 5m
+        labels:
+          severity: critical
+          service: redis
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Ingestion queue absent while durable non-terminal work exists"
+          description: "The broker queue key is missing while PostgreSQL reports non-terminal jobs; check for reset or queue loss."
+          runbook: "docs/monitoring-runbook.md#key-queue-unacked-disappearance-alert"
+      - alert: RedisBindingRecreationSpike
+        expr: increase(redis_binding_recreation_events_total[10m]) > 20
+        for: 1m
+        labels:
+          severity: warning
+          service: redis
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Kombu binding recreation spike"
+          description: "Unusual _kombu.binding/pidbox/fanout recreation rate; indicates Redis reset, restart, or topology churn."
+          runbook: "docs/monitoring-runbook.md#binding-recreation-spike"
+      - alert: RedisResultRecordCollapse
+        expr: (redis_result_records_total < 0.2 * max_over_time(redis_result_records_total[1h] offset 10m)) and (max_over_time(redis_result_records_total[1h] offset 10m) > 10)
+        for: 10m
+        labels:
+          severity: critical
+          service: redis
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Unusual Redis result-record collapse"
+          description: "Result-backend records fell below 20% of the recent baseline beyond normal TTL behaviour; correlate with task activity."
+          runbook: "docs/monitoring-runbook.md#result-record-collapse"
+      - alert: RedisRestartOrPersistenceAnomaly
+        expr: redis_rdb_last_bgsave_status != 1
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Redis persistence anomaly"
+          description: "Last RDB background save did not succeed; investigate persistence and disk health."
+          runbook: "docs/monitoring-runbook.md#persistence-anomaly"
+      - alert: RedisEmergencyIdentityUse
+        expr: increase(redis_acl_emergency_use_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Emergency Redis identity used"
+          description: "The break-glass identity was used; confirm owner approval and audit the session."
+          runbook: "docs/monitoring-runbook.md#emergency-default-identity-alert"
+      - alert: RedisDefaultOrNopassAuthSuccess
+        expr: increase(redis_acl_default_auth_success_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Default/nopass Redis authentication succeeded"
+          description: "A default or nopass authentication succeeded; the deny-by-default posture has regressed."
+          runbook: "docs/monitoring-runbook.md#emergency-default-identity-alert"
