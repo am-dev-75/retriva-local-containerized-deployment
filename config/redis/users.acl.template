@@ -1,0 +1,13 @@
+# Spec 034 / ADR-039 — Redis ACL template.
+# Rendered at container start from environment secrets; this file must never
+# contain a real credential. Passwords are injected by config/redis/entrypoint.sh.
+# Deny-by-default: every user grants only the exact commands it needs.
+user default off
+user rtrv-broker on >__REDIS_BROKER_PASSWORD__ ~ingestion* ~_kombu.binding.* ~unacked ~unacked_index ~unacked_mutex ~*.celery.pidbox* ~celeryev.* &/0.celeryev &/0.celeryev/* &/0.celeryev/worker.* &/0.celery.pidbox &/0.celery.pidbox/* +ping +client|setinfo +multi +exec +watch +unwatch +lpush +rpush +brpop +llen +publish +subscribe +psubscribe +unsubscribe +sadd +srem +smembers +zadd +zrem +zrevrangebyscore +zrangebyscore +zcount +hget +hset +hdel +get +set +del +evalsha +script|load
+user rtrv-results on >__REDIS_RESULTS_PASSWORD__ ~celery-task-meta-* &celery-task-meta-* +select +ping +client|setinfo +multi +exec +get +mget +set +setex +del +expire +publish +subscribe +unsubscribe
+user rtrv-monitor on >__REDIS_MONITOR_PASSWORD__ ~* +select +ping +client|setinfo +info +dbsize +scan +type +ttl +llen +exists +smembers +client|list +slowlog|get +slowlog|len +memory|usage +acl|list +acl|dryrun +acl|log
+user rtrv-health on >__REDIS_HEALTH_PASSWORD__ +ping +client|setinfo
+# Emergency administration: disabled definition only. Enable exclusively through
+# docs/redis-acl-runbook.md with recorded owner approval; never place its
+# credential in the deployment environment, services, images, or Git.
+user rtrv-emergency off

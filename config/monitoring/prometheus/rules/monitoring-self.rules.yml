@@ -1,0 +1,84 @@
+# Spec 035 / ADR-040 — monitoring self-monitoring rules.
+#
+# Detection for the monitoring path itself, using Prometheus-native metrics to
+# avoid circular blind spots. All labels bounded; no secrets.
+groups:
+  - name: retriva-monitoring-self
+    rules:
+      - alert: MonitoringCollectorScrapeDown
+        expr: up{job=~"redis-monitor|pg-monitor"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: monitoring
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Monitoring collector scrape is down"
+          description: "Prometheus cannot scrape a monitoring collector; security or correlation signals may be missing."
+          runbook: "docs/monitoring-runbook.md#monitoring-stack-unavailable"
+      - alert: MonitoringRuleEvaluationFailures
+        expr: increase(prometheus_rule_evaluation_failures_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: monitoring
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Prometheus rule evaluation failures"
+          description: "One or more rule groups failed to evaluate; alerts may be missing."
+          runbook: "docs/monitoring-runbook.md#monitoring-stack-unavailable"
+      - alert: MonitoringAlertmanagerDown
+        expr: up{job="alertmanager"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: monitoring
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Alertmanager unreachable"
+          description: "Prometheus cannot scrape Alertmanager; notification routing may be unavailable."
+          runbook: "docs/monitoring-runbook.md#monitoring-stack-unavailable"
+      - alert: MonitoringRedisExporterAuthFailures
+        expr: increase(redis_monitor_exporter_auth_failures_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: monitoring
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Redis exporter authentication failures"
+          description: "The read-only rtrv-monitor credential failed; Redis security signals are blind until fixed."
+          runbook: "docs/monitoring-runbook.md#redis-exporter-authentication-failure"
+      - alert: MonitoringPostgresGaugeStale
+        expr: time() - retriva_pg_monitor_last_success_timestamp_seconds > 120 and retriva_pg_monitor_last_success_timestamp_seconds > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: monitoring
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "PostgreSQL durable-job gauge is stale"
+          description: "The durable-job gauge has not refreshed; Redis/queue correlation signals are degraded."
+          runbook: "docs/monitoring-runbook.md#postgres-gauge-collector-failure"
+      - alert: MonitoringConfigReloadFailed
+        expr: prometheus_config_last_reload_successful == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: monitoring
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Prometheus configuration reload failed"
+          description: "The last configuration reload failed; the running configuration may be stale."
+          runbook: "docs/monitoring-runbook.md#monitoring-stack-unavailable"
+      - alert: MonitoringStorageHighUsage
+        expr: prometheus_tsdb_storage_blocks_bytes > 5 * 1024 * 1024 * 1024
+        for: 30m
+        labels:
+          severity: warning
+          service: monitoring
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Prometheus storage above the conservative threshold"
+          description: "TSDB blocks exceed the conservative 5 GiB default; review retention and capacity."
+          runbook: "docs/monitoring-runbook.md#monitoring-stack-unavailable"

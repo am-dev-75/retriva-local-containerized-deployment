@@ -6,19 +6,157 @@ networks:
     driver: bridge
 
 volumes:
+  # Spec 035 / ADR-040 monitoring stack
+  prometheus_data:
+  alertmanager_data:
+  alert_sink_data:
   qdrant_storage:
   retriva_core_storage:
   retriva_gateway_storage:
   mediawiki_connector_state:
   mediawiki_connector_2_state:
+  mediawiki_local_config:
+  mediawiki_local_db_data:
   email_agent_connector_state:
   whisper_models:
   redis_data:
-  messaging_db_data:
   apprise_config:
   messaging_state:
+  retriva_pg_data:
+  retriva_pgadmin_data:
 
 services:
+
+  # --- Spec 035 / ADR-040: canonical monitoring stack (profile "monitoring") ---
+  # Private network only (no host publication). Pinned images. Read-only
+  # collectors using rtrv-monitor (Redis) and a least-privilege PostgreSQL role.
+  # Deployment/rollback and runbooks: docs/monitoring-runbook.md.
+  retriva-prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.15.0}
+    container_name: retriva-prometheus
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-30d}
+      - --web.listen-address=0.0.0.0:9090
+      - --web.enable-lifecycle
+    volumes:
+      - ./config/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  retriva-alertmanager:
+    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.34.1}
+    container_name: retriva-alertmanager
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./config/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9093/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  retriva-alert-sink:
+    image: ${PYTHON_ALPINE_IMAGE:-python:3.12-alpine}
+    container_name: retriva-alert-sink
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    command: python /opt/monitoring/alert_sink.py
+    environment:
+      TZ: ${TZ:-UTC}
+      SINK_PORT: "9099"
+      SINK_LOG: /sink/alerts.log
+    volumes:
+      - ./config/monitoring/exporters/alert_sink.py:/opt/monitoring/alert_sink.py:ro
+      - alert_sink_data:/sink
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:9099/healthz',timeout=3)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  retriva-redis-monitor-exporter:
+    image: ${PYTHON_ALPINE_IMAGE:-python:3.12-alpine}
+    container_name: retriva-redis-monitor-exporter
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    command: python /opt/monitoring/redis_monitor_exporter.py
+    environment:
+      TZ: ${TZ:-UTC}
+      REDIS_MONITOR_HOST: redis
+      REDIS_MONITOR_PORT: "6379"
+      REDIS_MONITOR_USERNAME: rtrv-monitor
+      REDIS_MONITOR_PASSWORD: ${REDIS_MONITOR_PASSWORD:?set REDIS_MONITOR_PASSWORD in the env file}
+      EXPORTER_PORT: "9187"
+      POLL_INTERVAL_SECONDS: ${REDIS_EXPORTER_POLL_SECONDS:-15}
+    volumes:
+      - ./config/monitoring/exporters/redis_monitor_exporter.py:/opt/monitoring/redis_monitor_exporter.py:ro
+    networks:
+      - retriva-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:9187/healthz',timeout=3)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  retriva-pg-monitor-exporter:
+    build:
+      context: ./config/monitoring/exporters
+      dockerfile: Dockerfile.pg-monitor
+    image: ${PG_MONITOR_IMAGE:-retriva-pg-monitor-exporter:local}
+    container_name: retriva-pg-monitor-exporter
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    entrypoint: ["/bin/sh", "/opt/monitoring/pg_monitor_collector.sh"]
+    environment:
+      TZ: ${TZ:-UTC}
+      PGHOST: retriva-postgres
+      PGPORT: "5432"
+      PGDATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      PGUSER: ${RETRIVA_PG_MONITOR_USER:?set RETRIVA_PG_MONITOR_USER in the env file}
+      PGPASSWORD: ${RETRIVA_PG_MONITOR_PASSWORD:?set RETRIVA_PG_MONITOR_PASSWORD in the env file}
+      PGOPTIONS: -c statement_timeout=5000
+      METRICS_PORT: "9188"
+      PG_POLL_INTERVAL_SECONDS: ${PG_MONITOR_POLL_SECONDS:-15}
+    volumes:
+      - ./config/monitoring/exporters/pg_monitor_collector.sh:/opt/monitoring/pg_monitor_collector.sh:ro
+    networks:
+      - retriva-net
+    depends_on:
+      retriva-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9188/metrics.txt | grep -q retriva_pg_nonterminal_jobs || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
   qdrant:
     image: ${QDRANT_IMAGE:-qdrant/qdrant:latest}
     container_name: retriva-qdrant
@@ -90,29 +228,46 @@ services:
     networks:
       - retriva-net
 
+  # Spec 034 / ADR-039: least-privilege Redis ACLs. Users are rendered from
+  # environment secrets at container start; the default user is disabled
+  # unless REDIS_ALLOW_UNAUTHENTICATED_DEFAULT=yes (staged rollout only).
+  # Host publication is loopback-only; service traffic uses the private
+  # container network. See docs/redis-acl-runbook.md.
   redis:
     image: ${REDIS_IMAGE:-redis:7-alpine}
     container_name: retriva-redis
     restart: unless-stopped
+    entrypoint: ["/bin/sh", "/etc/redis/entrypoint.sh"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+      - ./config/redis/entrypoint.sh:/etc/redis/entrypoint.sh:ro
+      - ./config/redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./config/redis/users.acl.template:/etc/redis/users.acl.template:ro
     environment:
       TZ: ${TZ:-UTC}
+      REDIS_BROKER_PASSWORD: ${REDIS_BROKER_PASSWORD:?set REDIS_BROKER_PASSWORD in the env file}
+      REDIS_RESULTS_PASSWORD: ${REDIS_RESULTS_PASSWORD:?set REDIS_RESULTS_PASSWORD in the env file}
+      REDIS_MONITOR_PASSWORD: ${REDIS_MONITOR_PASSWORD:?set REDIS_MONITOR_PASSWORD in the env file}
+      REDIS_HEALTH_PASSWORD: ${REDIS_HEALTH_PASSWORD:?set REDIS_HEALTH_PASSWORD in the env file}
+      REDIS_ALLOW_UNAUTHENTICATED_DEFAULT: ${REDIS_ALLOW_UNAUTHENTICATED_DEFAULT:-no}
     networks:
       - retriva-net
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG || exit 1"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_HEALTH_PASSWORD\" redis-cli --user rtrv-health ping | grep PONG || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 5s
 
   retriva-ingestion:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     build:
-      context: ${RETRIVA_CORE_DIR:-../retriva-core}
+      context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_CORE_BUILD_TARGET:-base}
     image: ${RETRIVA_INGESTION_IMAGE:-retriva-ingestion:local}
     container_name: retriva-ingestion
     command: python -m retriva.ingestion_api --host 0.0.0.0 --port 8000
@@ -144,6 +299,47 @@ services:
       VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       RETRIEVAL_RERANK_BASE_URL: ${RETRIEVAL_RERANK_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      # Rerank provider selection (global, one setting for every KB/user):
+      # "" or "openrouter" (default, Cohere-compatible /rerank) or "bedrock"
+      # (Amazon Bedrock Rerank). With "bedrock", RETRIEVAL_RERANK_API_KEY is
+      # ignored and credentials come from the standard AWS chain
+      # (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN, shared
+      # config, or the workload IAM role).
+      RETRIEVAL_RERANK_PROVIDER: ${RETRIEVAL_RERANK_PROVIDER:-}
+      RETRIEVAL_RERANK_AWS_REGION: ${RETRIEVAL_RERANK_AWS_REGION:-}
+      RETRIEVAL_RERANK_STRICT_STARTUP_VALIDATION: ${RETRIEVAL_RERANK_STRICT_STARTUP_VALIDATION:-false}
+      RETRIEVAL_RERANK_ENFORCE_EU_REGION: ${RETRIEVAL_RERANK_ENFORCE_EU_REGION:-false}
+      RETRIEVAL_RERANK_ALLOWED_AWS_REGIONS: ${RETRIEVAL_RERANK_ALLOWED_AWS_REGIONS:-}
+      # --- Intent classification (Spec 001 Phase D; provider-agnostic,
+      # mirroring the reranker pattern).  Disabled by default; NO default
+      # model exists (never derived from CHAT_MODEL).  Canonical providers:
+      # openrouter | bedrock.  Both mutually exclusive alternatives are
+      # documented in .env.example; a deployment enables exactly one and
+      # sets the dedicated service-auth token (must equal the gateway's
+      # AGENT_INTENT_CLASSIFIER_SERVICE_AUTH_TOKEN).
+      INTENT_CLASSIFIER_ENABLED: ${INTENT_CLASSIFIER_ENABLED:-false}
+      INTENT_CLASSIFIER_PROVIDER: ${INTENT_CLASSIFIER_PROVIDER:-}
+      INTENT_CLASSIFIER_MODEL: ${INTENT_CLASSIFIER_MODEL:-}
+      INTENT_CLASSIFIER_TIMEOUT_SECONDS: ${INTENT_CLASSIFIER_TIMEOUT_SECONDS:-10}
+      INTENT_CLASSIFIER_MAX_RETRIES: ${INTENT_CLASSIFIER_MAX_RETRIES:-1}
+      INTENT_CLASSIFIER_MAX_CONCURRENT_REQUESTS: ${INTENT_CLASSIFIER_MAX_CONCURRENT_REQUESTS:-8}
+      INTENT_CLASSIFIER_MAX_INPUT_CHARS: ${INTENT_CLASSIFIER_MAX_INPUT_CHARS:-2000}
+      INTENT_CLASSIFIER_MAX_REQUEST_BYTES: ${INTENT_CLASSIFIER_MAX_REQUEST_BYTES:-32768}
+      INTENT_CLASSIFIER_RATE_LIMIT_PER_MINUTE: ${INTENT_CLASSIFIER_RATE_LIMIT_PER_MINUTE:-120}
+      INTENT_CLASSIFIER_PROMPT_VERSION: ${INTENT_CLASSIFIER_PROMPT_VERSION:-1}
+      INTENT_CLASSIFIER_REQUIRE_EU_RESIDENCY: ${INTENT_CLASSIFIER_REQUIRE_EU_RESIDENCY:-true}
+      INTENT_CLASSIFIER_REQUIRE_ZDR: ${INTENT_CLASSIFIER_REQUIRE_ZDR:-true}
+      INTENT_CLASSIFIER_SERVICE_AUTH_TOKEN: ${INTENT_CLASSIFIER_SERVICE_AUTH_TOKEN:-}
+      # OpenRouter-specific (only when provider=openrouter).
+      INTENT_CLASSIFIER_OPENROUTER_BASE_URL: ${INTENT_CLASSIFIER_OPENROUTER_BASE_URL:-https://eu.openrouter.ai/api/v1}
+      INTENT_CLASSIFIER_OPENROUTER_API_KEY: ${INTENT_CLASSIFIER_OPENROUTER_API_KEY:-}
+      INTENT_CLASSIFIER_OPENROUTER_REQUIRE_PARAMETERS: ${INTENT_CLASSIFIER_OPENROUTER_REQUIRE_PARAMETERS:-true}
+      INTENT_CLASSIFIER_OPENROUTER_ALLOW_FALLBACKS: ${INTENT_CLASSIFIER_OPENROUTER_ALLOW_FALLBACKS:-true}
+      INTENT_CLASSIFIER_OPENROUTER_DATA_COLLECTION: ${INTENT_CLASSIFIER_OPENROUTER_DATA_COLLECTION:-deny}
+      INTENT_CLASSIFIER_OPENROUTER_ZDR: ${INTENT_CLASSIFIER_OPENROUTER_ZDR:-true}
+      # Bedrock-specific (only when provider=bedrock).
+      INTENT_CLASSIFIER_AWS_REGION: ${INTENT_CLASSIFIER_AWS_REGION:-eu-central-1}
+      INTENT_CLASSIFIER_BEDROCK_INFERENCE_GEOGRAPHY: ${INTENT_CLASSIFIER_BEDROCK_INFERENCE_GEOGRAPHY:-eu}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
@@ -166,9 +362,9 @@ services:
       # Local-dev behavior
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
       LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
-      # ── Celery / Redis ─────────────────────────────────────────────────
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      # ── Celery / Redis (Spec 034 / ADR-039 least-privilege identities) ──
+      CELERY_BROKER_URL: "redis://rtrv-broker:${REDIS_BROKER_PASSWORD:?set REDIS_BROKER_PASSWORD in the env file}@redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://rtrv-results:${REDIS_RESULTS_PASSWORD:?set REDIS_RESULTS_PASSWORD in the env file}@redis:6379/1"
       CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-1}
       CELERY_TASK_MAX_RETRIES: ${CELERY_TASK_MAX_RETRIES:-3}
       # --- GraphRAG ---
@@ -179,6 +375,37 @@ services:
       GRAPH_TRAVERSAL_MAX_NODES: ${GRAPH_TRAVERSAL_MAX_NODES:-50}
       GRAPH_TRAVERSAL_MAX_EDGES: ${GRAPH_TRAVERSAL_MAX_EDGES:-100}
       GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD: ${GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD:-0.5}
+      # --- Retriva Pro extensions ---
+      RETRIVA_EXTENSIONS: ${RETRIVA_EXTENSIONS:-}
+      # --- Web Research: internal SearXNG (ADR-014) ---
+      CRM_SEARXNG_URL: ${CRM_SEARXNG_URL:-http://retriva-searxng:8080}
+      CRM_PUBLIC_RESEARCH_PROVIDER: ${CRM_PUBLIC_RESEARCH_PROVIDER:-searxng}
+      # --- CRM Assistant: Creditsafe financial-score integration (Spec 037;
+      # ADR-042).  Placeholders only, safe by default: integration DISABLED,
+      # sandbox environment when enabled, provider budgets ZERO (fail
+      # closed), 90-day freshness, name-only search disabled.  Credentials
+      # (username/password) come from the deployment env file at deploy
+      # time and are never committed.  Live sandbox activation requires an
+      # explicit owner-authorized change to these values.
+      CRM_CREDITSAFE_ENABLED: ${CRM_CREDITSAFE_ENABLED:-false}
+      CRM_CREDITSAFE_ENVIRONMENT: ${CRM_CREDITSAFE_ENVIRONMENT:-sandbox}
+      CRM_CREDITSAFE_USERNAME: ${CRM_CREDITSAFE_USERNAME:-}
+      CRM_CREDITSAFE_PASSWORD: ${CRM_CREDITSAFE_PASSWORD:-}
+      CRM_CREDITSAFE_TIMEOUT_SECONDS: ${CRM_CREDITSAFE_TIMEOUT_SECONDS:-15}
+      CRM_CREDITSAFE_MAX_RETRIES: ${CRM_CREDITSAFE_MAX_RETRIES:-2}
+      CRM_CREDITSAFE_FRESHNESS_DAYS: ${CRM_CREDITSAFE_FRESHNESS_DAYS:-90}
+      CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH: ${CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH:-false}
+      CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH: ${CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH:-0}
+      CRM_CREDITSAFE_BUDGET_CREDIT_REPORT: ${CRM_CREDITSAFE_BUDGET_CREDIT_REPORT:-0}
+      # --- Task LLM (for extensions: extraction, classification, summarization) ---
+      TASK_BASE_URL: ${TASK_BASE_URL:-}
+      TASK_MODEL: ${TASK_MODEL:-}
+      TASK_OPENAI_API_KEY: ${TASK_API_KEY:-}
+      TASK_SYSTEM_PROMPT: ${TASK_SYSTEM_PROMPT:-}
+      # --- Session Document Processing ---
+      SESSION_ATTACHMENT_MAX_SIZE: ${SESSION_ATTACHMENT_MAX_SIZE:-52428800}
+      SESSION_ATTACHMENT_TTL_SECONDS: ${SESSION_ATTACHMENT_TTL_SECONDS:-86400}
+      SESSION_ARTIFACT_TTL_SECONDS: ${SESSION_ARTIFACT_TTL_SECONDS:-172800}
     ports:
       - "${INGESTION_PORT:-8000}:8000"
     volumes:
@@ -190,6 +417,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Mandatory shared PostgreSQL: Core services start only after
+      # successful Core migrations (Spec 024; ADR-029).
+      retriva-pg-migrate:
+        condition: service_completed_successfully
     networks:
       - retriva-net
     healthcheck:
@@ -200,9 +431,12 @@ services:
       start_period: 30s
 
   retriva-core:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     build:
-      context: ${RETRIVA_CORE_DIR:-../retriva-core}
+      context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_CORE_BUILD_TARGET:-base}
     image: ${RETRIVA_CORE_IMAGE:-retriva-core:local}
     container_name: retriva-core
     restart: unless-stopped
@@ -233,6 +467,17 @@ services:
       VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       RETRIEVAL_RERANK_BASE_URL: ${RETRIEVAL_RERANK_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      # Rerank provider selection (global, one setting for every KB/user):
+      # "" or "openrouter" (default, Cohere-compatible /rerank) or "bedrock"
+      # (Amazon Bedrock Rerank). With "bedrock", RETRIEVAL_RERANK_API_KEY is
+      # ignored and credentials come from the standard AWS chain
+      # (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN, shared
+      # config, or the workload IAM role).
+      RETRIEVAL_RERANK_PROVIDER: ${RETRIEVAL_RERANK_PROVIDER:-}
+      RETRIEVAL_RERANK_AWS_REGION: ${RETRIEVAL_RERANK_AWS_REGION:-}
+      RETRIEVAL_RERANK_STRICT_STARTUP_VALIDATION: ${RETRIEVAL_RERANK_STRICT_STARTUP_VALIDATION:-false}
+      RETRIEVAL_RERANK_ENFORCE_EU_REGION: ${RETRIEVAL_RERANK_ENFORCE_EU_REGION:-false}
+      RETRIEVAL_RERANK_ALLOWED_AWS_REGIONS: ${RETRIEVAL_RERANK_ALLOWED_AWS_REGIONS:-}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
@@ -251,6 +496,12 @@ services:
       CHAT_TOP_P: ${CHAT_TOP_P:-1.0}
       CHAT_MAX_TOKENS: ${CHAT_MAX_TOKENS:-4096}
       CHAT_SEED: ${CHAT_SEED:-}
+
+      # --- Task LLM (for extensions: extraction, classification, summarization) ---
+      TASK_BASE_URL: ${TASK_BASE_URL:-}
+      TASK_MODEL: ${TASK_MODEL:-}
+      TASK_OPENAI_API_KEY: ${TASK_API_KEY:-}
+      TASK_SYSTEM_PROMPT: ${TASK_SYSTEM_PROMPT:-}
       # Optional system-prompt override (Retriva Pro / per-customer). When
       # non-empty, replaces the default grounded-QA prompt in retriva-core.
       # See .env.example for placeholder syntax.
@@ -267,6 +518,32 @@ services:
       GRAPH_TRAVERSAL_MAX_NODES: ${GRAPH_TRAVERSAL_MAX_NODES:-50}
       GRAPH_TRAVERSAL_MAX_EDGES: ${GRAPH_TRAVERSAL_MAX_EDGES:-100}
       GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD: ${GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD:-0.5}
+      # --- Retriva Pro extensions ---
+      RETRIVA_EXTENSIONS: ${RETRIVA_EXTENSIONS:-}
+      # --- Web Research: internal SearXNG (ADR-014) ---
+      CRM_SEARXNG_URL: ${CRM_SEARXNG_URL:-http://retriva-searxng:8080}
+      CRM_PUBLIC_RESEARCH_PROVIDER: ${CRM_PUBLIC_RESEARCH_PROVIDER:-searxng}
+      # --- CRM Assistant: Creditsafe financial-score integration (Spec 037;
+      # ADR-042).  Placeholders only, safe by default: integration DISABLED,
+      # sandbox environment when enabled, provider budgets ZERO (fail
+      # closed), 90-day freshness, name-only search disabled.  Credentials
+      # (username/password) come from the deployment env file at deploy
+      # time and are never committed.  Live sandbox activation requires an
+      # explicit owner-authorized change to these values.
+      CRM_CREDITSAFE_ENABLED: ${CRM_CREDITSAFE_ENABLED:-false}
+      CRM_CREDITSAFE_ENVIRONMENT: ${CRM_CREDITSAFE_ENVIRONMENT:-sandbox}
+      CRM_CREDITSAFE_USERNAME: ${CRM_CREDITSAFE_USERNAME:-}
+      CRM_CREDITSAFE_PASSWORD: ${CRM_CREDITSAFE_PASSWORD:-}
+      CRM_CREDITSAFE_TIMEOUT_SECONDS: ${CRM_CREDITSAFE_TIMEOUT_SECONDS:-15}
+      CRM_CREDITSAFE_MAX_RETRIES: ${CRM_CREDITSAFE_MAX_RETRIES:-2}
+      CRM_CREDITSAFE_FRESHNESS_DAYS: ${CRM_CREDITSAFE_FRESHNESS_DAYS:-90}
+      CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH: ${CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH:-false}
+      CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH: ${CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH:-0}
+      CRM_CREDITSAFE_BUDGET_CREDIT_REPORT: ${CRM_CREDITSAFE_BUDGET_CREDIT_REPORT:-0}
+      # --- Session Document Processing ---
+      SESSION_ATTACHMENT_MAX_SIZE: ${SESSION_ATTACHMENT_MAX_SIZE:-52428800}
+      SESSION_ATTACHMENT_TTL_SECONDS: ${SESSION_ATTACHMENT_TTL_SECONDS:-86400}
+      SESSION_ARTIFACT_TTL_SECONDS: ${SESSION_ARTIFACT_TTL_SECONDS:-172800}
     ports:
       - "${CORE_PORT:-8001}:8001"
     volumes:
@@ -276,6 +553,10 @@ services:
         condition: service_healthy
       tika:
         condition: service_healthy
+      # Mandatory shared PostgreSQL: Core services start only after
+      # successful Core migrations.
+      retriva-pg-migrate:
+        condition: service_completed_successfully
     networks:
       - retriva-net
     healthcheck:
@@ -286,9 +567,12 @@ services:
       start_period: 30s
 
   retriva-worker:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     build:
-      context: ${RETRIVA_CORE_DIR:-../retriva-core}
+      context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
       dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_CORE_BUILD_TARGET:-base}
     image: ${RETRIVA_INGESTION_IMAGE:-retriva-ingestion:local}
     container_name: retriva-worker
     command: python -m retriva.ingestion_api.worker
@@ -297,6 +581,9 @@ services:
       - ${ENV_FILE:-.env}
     environment:
       TZ: ${TZ:-UTC}
+      # Spec 034 / ADR-039: least-privilege broker (DB 0) and result (DB 1) identities.
+      CELERY_BROKER_URL: "redis://rtrv-broker:${REDIS_BROKER_PASSWORD:?set REDIS_BROKER_PASSWORD in the env file}@redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://rtrv-results:${REDIS_RESULTS_PASSWORD:?set REDIS_RESULTS_PASSWORD in the env file}@redis:6379/1"
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       RETRIVA_DEFAULT_COLLECTION: ${RETRIVA_DEFAULT_COLLECTION:-retriva_chunks}
       TIKA_SERVER_URL: ${TIKA_SERVER_URL:-http://tika:9998}
@@ -311,6 +598,17 @@ services:
       VISUAL_BASE_URL: ${VISUAL_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
       RETRIEVAL_RERANK_BASE_URL: ${RETRIEVAL_RERANK_BASE_URL:-${LLM_PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}}
+      # Rerank provider selection (global, one setting for every KB/user):
+      # "" or "openrouter" (default, Cohere-compatible /rerank) or "bedrock"
+      # (Amazon Bedrock Rerank). With "bedrock", RETRIEVAL_RERANK_API_KEY is
+      # ignored and credentials come from the standard AWS chain
+      # (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN, shared
+      # config, or the workload IAM role).
+      RETRIEVAL_RERANK_PROVIDER: ${RETRIEVAL_RERANK_PROVIDER:-}
+      RETRIEVAL_RERANK_AWS_REGION: ${RETRIEVAL_RERANK_AWS_REGION:-}
+      RETRIEVAL_RERANK_STRICT_STARTUP_VALIDATION: ${RETRIEVAL_RERANK_STRICT_STARTUP_VALIDATION:-false}
+      RETRIEVAL_RERANK_ENFORCE_EU_REGION: ${RETRIEVAL_RERANK_ENFORCE_EU_REGION:-false}
+      RETRIEVAL_RERANK_ALLOWED_AWS_REGIONS: ${RETRIEVAL_RERANK_ALLOWED_AWS_REGIONS:-}
       CHAT_MODEL: ${CHAT_MODEL:-qwen/qwen3.5-27b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       VISUAL_MODEL: ${VISUAL_MODEL:-qwen/qwen3-vl-32b-instruct}
@@ -329,10 +627,14 @@ services:
       CHAT_TOP_P: ${CHAT_TOP_P:-1.0}
       CHAT_MAX_TOKENS: ${CHAT_MAX_TOKENS:-4096}
       CHAT_SEED: ${CHAT_SEED:-}
+
+      # --- Task LLM (for extensions: extraction, classification, summarization) ---
+      TASK_BASE_URL: ${TASK_BASE_URL:-}
+      TASK_MODEL: ${TASK_MODEL:-}
+      TASK_OPENAI_API_KEY: ${TASK_API_KEY:-}
+      TASK_SYSTEM_PROMPT: ${TASK_SYSTEM_PROMPT:-}
       ENABLE_INTERNAL_PROFILER: ${ENABLE_INTERNAL_PROFILER:-true}
       LOG_LEVEL: ${CORE_LOG_LEVEL:-INFO}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
       CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-1}
       CELERY_TASK_MAX_RETRIES: ${CELERY_TASK_MAX_RETRIES:-3}
       # --- GraphRAG ---
@@ -343,6 +645,32 @@ services:
       GRAPH_TRAVERSAL_MAX_NODES: ${GRAPH_TRAVERSAL_MAX_NODES:-50}
       GRAPH_TRAVERSAL_MAX_EDGES: ${GRAPH_TRAVERSAL_MAX_EDGES:-100}
       GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD: ${GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD:-0.5}
+      # --- Retriva Pro extensions ---
+      RETRIVA_EXTENSIONS: ${RETRIVA_EXTENSIONS:-}
+      # --- Web Research: internal SearXNG (ADR-014) ---
+      CRM_SEARXNG_URL: ${CRM_SEARXNG_URL:-http://retriva-searxng:8080}
+      CRM_PUBLIC_RESEARCH_PROVIDER: ${CRM_PUBLIC_RESEARCH_PROVIDER:-searxng}
+      # --- CRM Assistant: Creditsafe financial-score integration (Spec 037;
+      # ADR-042).  Placeholders only, safe by default: integration DISABLED,
+      # sandbox environment when enabled, provider budgets ZERO (fail
+      # closed), 90-day freshness, name-only search disabled.  Credentials
+      # (username/password) come from the deployment env file at deploy
+      # time and are never committed.  Live sandbox activation requires an
+      # explicit owner-authorized change to these values.
+      CRM_CREDITSAFE_ENABLED: ${CRM_CREDITSAFE_ENABLED:-false}
+      CRM_CREDITSAFE_ENVIRONMENT: ${CRM_CREDITSAFE_ENVIRONMENT:-sandbox}
+      CRM_CREDITSAFE_USERNAME: ${CRM_CREDITSAFE_USERNAME:-}
+      CRM_CREDITSAFE_PASSWORD: ${CRM_CREDITSAFE_PASSWORD:-}
+      CRM_CREDITSAFE_TIMEOUT_SECONDS: ${CRM_CREDITSAFE_TIMEOUT_SECONDS:-15}
+      CRM_CREDITSAFE_MAX_RETRIES: ${CRM_CREDITSAFE_MAX_RETRIES:-2}
+      CRM_CREDITSAFE_FRESHNESS_DAYS: ${CRM_CREDITSAFE_FRESHNESS_DAYS:-90}
+      CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH: ${CRM_CREDITSAFE_ALLOW_NAME_ONLY_SEARCH:-false}
+      CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH: ${CRM_CREDITSAFE_BUDGET_COMPANY_SEARCH:-0}
+      CRM_CREDITSAFE_BUDGET_CREDIT_REPORT: ${CRM_CREDITSAFE_BUDGET_CREDIT_REPORT:-0}
+      # --- Session Document Processing ---
+      SESSION_ATTACHMENT_MAX_SIZE: ${SESSION_ATTACHMENT_MAX_SIZE:-52428800}
+      SESSION_ATTACHMENT_TTL_SECONDS: ${SESSION_ATTACHMENT_TTL_SECONDS:-86400}
+      SESSION_ARTIFACT_TTL_SECONDS: ${SESSION_ARTIFACT_TTL_SECONDS:-172800}
     volumes:
       - retriva_core_storage:/app/storage
     depends_on:
@@ -352,6 +680,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Mandatory shared PostgreSQL: Core services start only after
+      # successful Core migrations.
+      retriva-pg-migrate:
+        condition: service_completed_successfully
     networks:
       - retriva-net
     healthcheck:
@@ -365,6 +697,7 @@ services:
     build:
       context: ${RETRIVA_GATEWAY_CONTEXT:-${RETRIVA_GATEWAY_DIR:-../retriva-gateway}}
       dockerfile: ${RETRIVA_GATEWAY_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_GATEWAY_BUILD_TARGET:-base}
     image: ${RETRIVA_GATEWAY_IMAGE:-retriva-gateway:local}
     container_name: retriva-gateway
     restart: unless-stopped
@@ -374,6 +707,9 @@ services:
       TZ: ${TZ:-UTC}
       RETRIVA_CORE_INGESTION_URL: ${RETRIVA_CORE_INGESTION_URL:-http://retriva-ingestion:8000}
       RETRIVA_CORE_CHAT_URL: ${RETRIVA_CORE_CHAT_URL:-http://retriva-core:8001}
+      # Browser-reachable origin for clickable review/report links the
+      # chat agent emits (mirrors the WebUI's VITE gateway base URL).
+      GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:-http://localhost:${GATEWAY_PORT:-8002}}
       DYNAMIC_INGESTION_ENABLED: ${DYNAMIC_INGESTION_ENABLED:-true}
       GATEWAY_INTERNAL_SERVICE_TOKEN: ${GATEWAY_INTERNAL_SERVICE_TOKEN:-local-dev-service-token}
       LOG_LEVEL: ${GATEWAY_LOG_LEVEL:-INFO}
@@ -389,6 +725,25 @@ services:
       RETRIVA_ENTRA_ROLE_CLAIM: ${RETRIVA_ENTRA_ROLE_CLAIM:-roles}
       RETRIVA_ENTRA_GROUPS_CLAIM: ${RETRIVA_ENTRA_GROUPS_CLAIM:-groups}
       RETRIVA_ENTRA_JWKS_REFRESH_SECONDS: ${RETRIVA_ENTRA_JWKS_REFRESH_SECONDS:-3600}
+      # Trusted machine-caller principal presented to the CRM extension
+      # when auth is disabled (must match CRM_EXECUTOR_SERVICE_PRINCIPAL;
+      # empty = legacy anonymous behavior).
+      RETRIVA_SERVICE_PRINCIPAL: ${RETRIVA_SERVICE_PRINCIPAL:-${CRM_EXECUTOR_SERVICE_PRINCIPAL:-}}
+      # Set false on deployments without the CRM PostgreSQL extension
+      # (removes the 19 ACP/enrichment tool schemas from chat).
+      AGENT_ACP_TOOLS_ENABLED: ${AGENT_ACP_TOOLS_ENABLED:-true}
+      # --- Hybrid intent routing — classifier policy (Spec 001 Phase D).
+      # Untrusted advisory classifier; mode off and streaming never invoke
+      # it; the transport is Core's deployment-global configuration.
+      AGENT_INTENT_CLASSIFIER_ENABLED: ${AGENT_INTENT_CLASSIFIER_ENABLED:-false}
+      AGENT_INTENT_CLASSIFIER_MIN_CONFIDENCE: ${AGENT_INTENT_CLASSIFIER_MIN_CONFIDENCE:-0.85}
+      AGENT_INTENT_CLASSIFIER_SAFE_WORKFLOW_MIN_CONFIDENCE: ${AGENT_INTENT_CLASSIFIER_SAFE_WORKFLOW_MIN_CONFIDENCE:-0.90}
+      AGENT_INTENT_CLASSIFIER_MAX_INPUT_CHARS: ${AGENT_INTENT_CLASSIFIER_MAX_INPUT_CHARS:-2000}
+      AGENT_INTENT_CLASSIFIER_MAX_CONTEXT_TURNS: ${AGENT_INTENT_CLASSIFIER_MAX_CONTEXT_TURNS:-4}
+      AGENT_INTENT_CLASSIFIER_FAIL_MODE: ${AGENT_INTENT_CLASSIFIER_FAIL_MODE:-clarify}
+      # Dedicated service credential (must equal Core's
+      # INTENT_CLASSIFIER_SERVICE_AUTH_TOKEN).
+      AGENT_INTENT_CLASSIFIER_SERVICE_AUTH_TOKEN: ${AGENT_INTENT_CLASSIFIER_SERVICE_AUTH_TOKEN:-}
     ports:
       - "${GATEWAY_PORT:-8002}:8002"
     volumes:
@@ -396,6 +751,10 @@ services:
     depends_on:
       retriva-core:
         condition: service_started
+      # Mandatory shared PostgreSQL: Core services start only after
+      # successful Core migrations.
+      retriva-pg-migrate:
+        condition: service_completed_successfully
     networks:
       - retriva-net
     healthcheck:
@@ -404,6 +763,36 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
+
+  # --- Retriva Pro: internal SearXNG metasearch (ADR-014) ---
+  # URL-discovery provider for Web Research.  Internal network only — no
+  # published host port.  JSON output is required by SearxngSearchProvider;
+  # the readiness probe treats a JSON-disabled instance as not ready.
+  # SEARXNG_SECRET must be set in the env file (generate with:
+  #   python -c "import secrets; print(secrets.token_urlsafe(48))" ).
+  retriva-searxng:
+    image: ${SEARXNG_IMAGE:-searxng/searxng:2026.9.11-61d660276}
+    container_name: retriva-searxng
+    restart: unless-stopped
+    profiles: ["pro"]
+    env_file:
+      - ${ENV_FILE:-.env}
+    environment:
+      TZ: ${TZ:-UTC}
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://retriva-searxng:8080}
+      INSTANCE_NAME: ${SEARXNG_INSTANCE_NAME:-retriva-searxng}
+    volumes:
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    networks:
+      - retriva-net
+    # No `ports:` — deliberately not reachable from the host or public net.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   # --- Retriva Pro: MediaWiki Connectors ---
   # Each MediaWiki instance gets its own connector service with its own
@@ -433,7 +822,7 @@ services:
       MEDIAWIKI_CONNECTOR_COLLECTION: ${MEDIAWIKI_CONNECTOR_COLLECTION:-}
       MEDIAWIKI_CONNECTOR_KB_IDS: ${MEDIAWIKI_CONNECTOR_KB_IDS:-}
       MEDIAWIKI_CONNECTOR_TAG: ${MEDIAWIKI_CONNECTOR_TAG:-}
-      MEDIAWIKI_CONNECTOR_PUBLIC_URL: ${MEDIAWIKI_CONNECTOR_PUBLIC_URL:-}
+      MEDIAWIKI_CONNECTOR_PUBLIC_URL: ${MEDIAWIKI_CONNECTOR_PUBLIC_URL:-http://localhost:${INGESTION_PORT:-8000}/api.php}
       MEDIAWIKI_USERNAME: ${MEDIAWIKI_CONNECTOR_USERNAME:-}
       MEDIAWIKI_BOT_PASSWORD: ${MEDIAWIKI_CONNECTOR_BOT_PASSWORD:-}
       MEDIAWIKI_CONFIG: /app/config/mediawiki.yaml
@@ -443,6 +832,8 @@ services:
       - mediawiki_connector_state:/app/state
     depends_on:
       retriva-gateway:
+        condition: service_healthy
+      mediawiki-local:
         condition: service_healthy
     networks:
       - retriva-net
@@ -488,6 +879,88 @@ services:
   #   extra_hosts:
   #     - "host.docker.internal:host-gateway"
   #   command: ${MEDIAWIKI_CONNECTOR_2_COMMAND:-daemon}
+
+  # --- Local-development MediaWiki dependency for the MediaWiki connector ---
+  # A minimal, private, persistent MediaWiki used only for local-development
+  # connector validation.  It is not published on any host port and is reachable
+  # only from the `retriva-local-net` network as `mediawiki-local`, matching the
+  # existing `MEDIAWIKI_CONNECTOR_API_URL` default
+  # (`http://mediawiki-local:80/api.php`).  Its database is isolated from the
+  # Retriva centralized PostgreSQL store.
+  mediawiki-local-db:
+    image: ${MEDIAWIKI_LOCAL_DB_IMAGE:-mariadb:11.4}
+    container_name: mediawiki-local-db
+    restart: unless-stopped
+    profiles: ["pro", "connectors"]
+    environment:
+      TZ: ${TZ:-UTC}
+      MARIADB_DATABASE: ${MEDIAWIKI_LOCAL_DB_NAME:-mediawiki_local}
+      MARIADB_USER: ${MEDIAWIKI_LOCAL_DB_USER:-mediawiki}
+      MARIADB_PASSWORD: ${MEDIAWIKI_LOCAL_DB_PASSWORD:-}
+      MARIADB_ROOT_PASSWORD: ${MEDIAWIKI_LOCAL_DB_ROOT_PASSWORD:-}
+    volumes:
+      - mediawiki_local_db_data:/var/lib/mysql
+    networks:
+      - retriva-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  mediawiki-local:
+    image: ${MEDIAWIKI_LOCAL_IMAGE:-mediawiki:1.43.11}
+    container_name: mediawiki-local
+    restart: unless-stopped
+    profiles: ["pro", "connectors"]
+    depends_on:
+      mediawiki-local-db:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-UTC}
+      MW_DB_HOST: mediawiki-local-db
+      MW_DB_NAME: ${MEDIAWIKI_LOCAL_DB_NAME:-mediawiki_local}
+      MW_DB_USER: ${MEDIAWIKI_LOCAL_DB_USER:-mediawiki}
+      MW_DB_PASSWORD: ${MEDIAWIKI_LOCAL_DB_PASSWORD:-}
+      MW_ADMIN_USER: ${MEDIAWIKI_LOCAL_ADMIN_USER:-retriva_admin}
+      MW_ADMIN_PASSWORD: ${MEDIAWIKI_LOCAL_ADMIN_PASSWORD:-}
+      MW_SERVER: ${MEDIAWIKI_LOCAL_SERVER:-http://mediawiki-local}
+      MW_SITE_NAME: ${MEDIAWIKI_LOCAL_SITE_NAME:-Retriva Local Wiki}
+    volumes:
+      - mediawiki_local_config:/config
+    networks:
+      - retriva-net
+    # One-time, non-interactive local-development initialization: install the
+    # wiki into the persistent /config volume on first start, then symlink
+    # LocalSettings.php into the web root and run Apache.  Credentials come only
+    # from the environment (no secrets are written to the repository).
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        for i in $$(seq 1 60); do
+          php -r 'exit(@mysqli_connect(getenv("MW_DB_HOST"),getenv("MW_DB_USER"),getenv("MW_DB_PASSWORD"),getenv("MW_DB_NAME"),3306)?0:1);' && break
+          echo "waiting for mediawiki database ($$i)"; sleep 2
+        done
+        if [ ! -f /config/LocalSettings.php ]; then
+          php /var/www/html/maintenance/install.php \
+            --dbtype mysql --dbserver "$$MW_DB_HOST" --dbname "$$MW_DB_NAME" \
+            --dbuser "$$MW_DB_USER" --dbpass "$$MW_DB_PASSWORD" \
+            --pass "$$MW_ADMIN_PASSWORD" --server "$$MW_SERVER" \
+            --scriptpath "" --lang en "$$MW_SITE_NAME" "$$MW_ADMIN_USER"
+          cp -f /var/www/html/LocalSettings.php /config/LocalSettings.php
+        fi
+        cp -f /config/LocalSettings.php /var/www/html/LocalSettings.php
+        chmod 644 /var/www/html/LocalSettings.php
+        exec apache2-foreground
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost/api.php?action=query&meta=siteinfo&format=json' | grep -q '\"batchcomplete\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
 
   # --- Retriva Pro: Email Agent Connector ---
   # Runs a built-in SMTP server that receives emails sent to a Retriva-managed
@@ -544,33 +1017,13 @@ services:
   # Retriva Messaging is the system of record; Apprise API is a replaceable
   # delivery adapter.  See ../retriva-messaging-extension/README.md.
   #
-  # Three services are started:
-  #   retriva-messaging-db  — PostgreSQL (dedicated database)
-  #   apprise-api           — Apprise API server (delivery adapter)
-  #   retriva-messaging     — Messaging API + worker
-  #
-  # All three are tagged with the "pro" profile and are only started by
-  # `./scripts/manage.sh up-pro`.  The base `up` command is unaffected.
-  retriva-messaging-db:
-    image: ${MESSAGING_DB_IMAGE:-postgres:16-alpine}
-    container_name: retriva-messaging-db
-    restart: unless-stopped
-    profiles: ["pro", "messaging"]
-    environment:
-      TZ: ${TZ:-UTC}
-      POSTGRES_DB: ${MESSAGING_DB_NAME:-retriva_messaging}
-      POSTGRES_USER: ${MESSAGING_DB_USER:-messaging}
-      POSTGRES_PASSWORD: ${MESSAGING_DB_PASSWORD:-messaging}
-    volumes:
-      - messaging_db_data:/var/lib/postgresql/data
-    networks:
-      - retriva-net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${MESSAGING_DB_USER:-messaging} -d ${MESSAGING_DB_NAME:-retriva_messaging}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+  # NOTE (Spec 024; ADR-029): the retired dedicated Messaging
+  # PostgreSQL service (`retriva-messaging-db`) and the
+  # `retriva_messaging` database target were removed.  Messaging uses
+  # the shared `retriva-postgres` service and the common `retriva`
+  # database with the Pro-owned `messaging` schema; its role and
+  # schema are provisioned by `retriva-pg-messaging-bootstrap` and its
+  # Alembic stream by `retriva-pg-messaging-migrate`.
 
   apprise-api:
     image: ${APPRISE_API_IMAGE:-caronc/apprise:latest}
@@ -612,7 +1065,14 @@ services:
       RETRIVA_MESSAGING_ENABLED_CHANNELS: ${RETRIVA_MESSAGING_ENABLED_CHANNELS:-email}
       RETRIVA_MESSAGING_DEFAULT_CHANNELS: ${RETRIVA_MESSAGING_DEFAULT_CHANNELS:-email}
       RETRIVA_MESSAGING_ALLOW_ARBITRARY_DESTINATIONS: ${RETRIVA_MESSAGING_ALLOW_ARBITRARY_DESTINATIONS:-false}
-      RETRIVA_MESSAGING_DATABASE_URL: postgresql+psycopg2://${MESSAGING_DB_USER:-messaging}:${MESSAGING_DB_PASSWORD:-messaging}@retriva-messaging-db:5432/${MESSAGING_DB_NAME:-retriva_messaging}
+      # Shared Retriva PostgreSQL service, `retriva` database,
+      # Pro-owned `messaging` schema.  The runtime identity is the
+      # dedicated `retriva_messaging` role (never the migrator or the
+      # admin); migrations run through `retriva-pg-messaging-migrate`.
+      # (manage.sh `messaging-*` commands fail fast when the runtime
+      # credential is unset; the compose interpolation default stays
+      # empty so non-messaging deployments validate cleanly.)
+      RETRIVA_MESSAGING_DATABASE_URL: postgresql+psycopg2://${RETRIVA_MESSAGING_DB_USER:-retriva_messaging}:${RETRIVA_MESSAGING_DB_PASSWORD:-}@retriva-postgres:5432/${RETRIVA_PG_DATABASE:-retriva}
       RETRIVA_MESSAGING_APPRISE_API_URL: http://apprise-api:8000
       RETRIVA_MESSAGING_APPRISE_EMAIL_TAG: ${RETRIVA_MESSAGING_APPRISE_EMAIL_TAG:-retriva-email}
       RETRIVA_MESSAGING_EMAIL_FROM_ADDRESS: ${RETRIVA_MESSAGING_EMAIL_FROM_ADDRESS:-retriva@localhost}
@@ -626,8 +1086,11 @@ services:
       - ./config/messaging.yaml:/app/config/messaging.yaml:ro
       - messaging_state:/app/state
     depends_on:
-      retriva-messaging-db:
-        condition: service_healthy
+      # Shared-PostgreSQL lifecycle: the Messaging service starts only
+      # after its own migration stream succeeded (Core migrations
+      # first, then the Messaging one-shot), never before.
+      retriva-pg-messaging-migrate:
+        condition: service_completed_successfully
       apprise-api:
         condition: service_healthy
     networks:
@@ -644,7 +1107,7 @@ services:
       context: ${RETRIVA_WEBUI_DIR:-../retriva-webui}
       dockerfile: ${RETRIVA_WEBUI_DOCKERFILE:-Dockerfile}
       args:
-        VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:8002}
+        VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:${GATEWAY_PORT:-8002}}
         VITE_RETRIVA_ENABLE_VOICE_INPUT: ${VITE_RETRIVA_ENABLE_VOICE_INPUT:-true}
         VITE_RETRIVA_AUTH_PROVIDER: ${VITE_RETRIVA_AUTH_PROVIDER:-none}
         VITE_RETRIVA_ENTRA_CLIENT_ID: ${VITE_RETRIVA_ENTRA_CLIENT_ID:-}
@@ -658,7 +1121,7 @@ services:
       - ${ENV_FILE:-.env}
     environment:
       TZ: ${TZ:-UTC}
-      VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:8002}
+      VITE_RETRIVA_GATEWAY_BASE_URL: ${VITE_RETRIVA_GATEWAY_BASE_URL:-http://localhost:${GATEWAY_PORT:-8002}}
       RETRIVA_GATEWAY_BASE_URL: ${RETRIVA_GATEWAY_BASE_URL_FOR_WEBUI:-http://retriva-gateway:8002}
       VITE_SPEECH_INPUT_MODE: ${VITE_SPEECH_INPUT_MODE:-gateway}
       VITE_RETRIVA_ENABLE_VOICE_INPUT: ${VITE_RETRIVA_ENABLE_VOICE_INPUT:-true}
@@ -672,5 +1135,276 @@ services:
     depends_on:
       retriva-gateway:
         condition: service_started
+    networks:
+      - retriva-net
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Business Intelligence Database (Retriva Pro).
+  #
+  # PostgreSQL is the authoritative RELATIONAL store: canonical
+  # organization identity, business facts, commercial roles,
+  # lifecycle, qualification history, exclusions, ERP imports, and
+  # audit.  It does NOT replace Qdrant (embeddings/retrieval) and is
+  # not published to the host: it is reachable only inside the
+  # retriva-net Docker network.
+  #
+  # Gated behind the "db" profile so base and "pro" deployments are
+  # unaffected (each phase is independently deployable and reversible):
+  #   ./scripts/manage.sh db-up
+  # ---------------------------------------------------------------------------
+  # Mandatory shared PostgreSQL (Spec 024; ADR-029): one instance,
+  # one `retriva` database, module-owned schemas.  Never profile-gated
+  # anymore — Core-only deployments start it too.  The volume holds
+  # real development data; it is never recreated by the lifecycle.
+  retriva-postgres:
+    image: ${RETRIVA_PG_IMAGE:-postgres:16.15-alpine}
+    container_name: retriva-postgres
+    restart: unless-stopped
+    volumes:
+      - retriva_pg_data:/var/lib/postgresql/data
+    environment:
+      TZ: ${TZ:-UTC}
+      POSTGRES_DB: ${RETRIVA_PG_DATABASE:-retriva}
+      POSTGRES_USER: ${RETRIVA_PG_ADMIN_USER:-retriva_admin}
+      # Set exactly ONE of the two in .env (env value or a mounted
+      # secret file).  Real credentials are never committed.
+      POSTGRES_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
+      POSTGRES_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
+    healthcheck:
+      # No credentials in the health output: user and database names
+      # only.
+      test: ["CMD-SHELL", "pg_isready -U ${RETRIVA_PG_ADMIN_USER:-retriva_admin} -d ${RETRIVA_PG_DATABASE:-retriva}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - retriva-net
+
+  # One-shot Core platform bootstrap (cluster-admin connection):
+  # provisions the platform roles (migrator, Core runtime) and
+  # restricts database CREATE to the migrator.  Long-running services
+  # NEVER use the admin/superuser account.  Runs the Core-only `base`
+  # image (no Pro package, no Pro credential).
+  retriva-pg-bootstrap:
+    build:
+      # Repo-relative context: the Core-only `base` stage copies
+      # repo-relative paths (src/, requirements.txt), unlike the
+      # `pro` stage which copies workspace-parent-relative paths.
+      # The platform one-shots must therefore always build from the
+      # core repo context, even in Pro deployments that override
+      # RETRIVA_CORE_CONTEXT to the workspace parent.
+      context: ${RETRIVA_PG_TOOLS_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
+      dockerfile: ${RETRIVA_PG_TOOLS_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_PG_BUILD_TARGET:-base}
+    image: ${RETRIVA_CORE_BASE_IMAGE:-retriva-core-base:local}
+    container_name: retriva-pg-bootstrap
+    restart: "no"
+    command: python -m retriva.infrastructure.postgres.migrate bootstrap
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_PG_HOST: retriva-postgres
+      RETRIVA_PG_PORT: "5432"
+      RETRIVA_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      RETRIVA_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      RETRIVA_PG_ADMIN_USER: ${RETRIVA_PG_ADMIN_USER:-retriva_admin}
+      RETRIVA_PG_ADMIN_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
+      RETRIVA_PG_ADMIN_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
+      RETRIVA_PG_MIGRATOR_PASSWORD: ${RETRIVA_PG_MIGRATOR_PASSWORD:-}
+      RETRIVA_PG_MIGRATOR_PASSWORD_FILE: ${RETRIVA_PG_MIGRATOR_PASSWORD_FILE:-}
+      RETRIVA_PG_CORE_PASSWORD: ${RETRIVA_PG_CORE_PASSWORD:-}
+      RETRIVA_PG_CORE_PASSWORD_FILE: ${RETRIVA_PG_CORE_PASSWORD_FILE:-}
+    depends_on:
+      retriva-postgres:
+        condition: service_healthy
+    networks:
+      - retriva-net
+
+  # One-shot controlled Core migration step (migrator role only):
+  # applies the `core.platform` stream (Core schema + ledger).  Core
+  # services start only after this succeeds.  Core-only by design: no
+  # extension provider is registered here (the extension one-shots
+  # apply their own streams after this one).  Runs the Core-only
+  # `base` image.
+  retriva-pg-migrate:
+    build:
+      # Repo-relative context (see retriva-pg-bootstrap).
+      context: ${RETRIVA_PG_TOOLS_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
+      dockerfile: ${RETRIVA_PG_TOOLS_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_PG_BUILD_TARGET:-base}
+    image: ${RETRIVA_CORE_BASE_IMAGE:-retriva-core-base:local}
+    container_name: retriva-pg-migrate
+    restart: "no"
+    command: python -m retriva.infrastructure.postgres.migrate upgrade
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_PG_HOST: retriva-postgres
+      RETRIVA_PG_PORT: "5432"
+      RETRIVA_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      RETRIVA_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      RETRIVA_PG_MIGRATOR_PASSWORD: ${RETRIVA_PG_MIGRATOR_PASSWORD:-}
+      RETRIVA_PG_MIGRATOR_PASSWORD_FILE: ${RETRIVA_PG_MIGRATOR_PASSWORD_FILE:-}
+    depends_on:
+      retriva-postgres:
+        condition: service_healthy
+      retriva-pg-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - retriva-net
+
+  # One-shot Pro CRM extension bootstrap (profiles: pro/db): the four
+  # CRM extension roles (application, importer, readonly, pgAdmin
+  # operator).  The platform roles come from the Core bootstrap; this
+  # step runs after it and reuses the Core generic provisioning.
+  retriva-pg-crm-bootstrap:
+    build:
+      context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
+      dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_PG_CRM_BUILD_TARGET:-pro}
+    image: ${RETRIVA_CORE_IMAGE:-retriva-core:local}
+    container_name: retriva-pg-crm-bootstrap
+    restart: "no"
+    profiles: ["pro", "db"]
+    command: python -m retriva_crm_assistant.postgres.migrate bootstrap-roles
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_PG_HOST: retriva-postgres
+      RETRIVA_PG_PORT: "5432"
+      RETRIVA_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      RETRIVA_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      RETRIVA_PG_ADMIN_USER: ${RETRIVA_PG_ADMIN_USER:-retriva_admin}
+      RETRIVA_PG_ADMIN_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
+      RETRIVA_PG_ADMIN_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
+      CRM_PG_APPLICATION_PASSWORD: ${CRM_PG_APPLICATION_PASSWORD:-}
+      CRM_PG_APPLICATION_PASSWORD_FILE: ${CRM_PG_APPLICATION_PASSWORD_FILE:-}
+      CRM_PG_IMPORTER_PASSWORD: ${CRM_PG_IMPORTER_PASSWORD:-}
+      CRM_PG_IMPORTER_PASSWORD_FILE: ${CRM_PG_IMPORTER_PASSWORD_FILE:-}
+      CRM_PG_READONLY_PASSWORD: ${CRM_PG_READONLY_PASSWORD:-}
+      CRM_PG_READONLY_PASSWORD_FILE: ${CRM_PG_READONLY_PASSWORD_FILE:-}
+      CRM_PGADMIN_UI_OPERATOR_PASSWORD: ${CRM_PGADMIN_UI_OPERATOR_PASSWORD:-}
+      CRM_PGADMIN_UI_OPERATOR_PASSWORD_FILE: ${CRM_PGADMIN_UI_OPERATOR_PASSWORD_FILE:-}
+    depends_on:
+      retriva-pg-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - retriva-net
+
+  # One-shot controlled Pro CRM migration step (profiles: pro/db):
+  # applies the `pro.crm` stream through the provider contract
+  # (adopting the retired `audit.schema_migrations` history when
+  # present).  Depends on the Core migrations; no Core service
+  # depends on it.
+  retriva-pg-crm-migrate:
+    build:
+      context: ${RETRIVA_CORE_CONTEXT:-${RETRIVA_CORE_DIR:-../retriva-core}}
+      dockerfile: ${RETRIVA_CORE_DOCKERFILE:-Dockerfile}
+      target: ${RETRIVA_PG_CRM_BUILD_TARGET:-pro}
+    image: ${RETRIVA_CORE_IMAGE:-retriva-core:local}
+    container_name: retriva-pg-crm-migrate
+    restart: "no"
+    profiles: ["pro", "db"]
+    command: python -m retriva_crm_assistant.postgres.migrate upgrade
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_PG_HOST: retriva-postgres
+      RETRIVA_PG_PORT: "5432"
+      RETRIVA_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      RETRIVA_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      # The migration step runs ONLY with the migrator credential
+      # (extension role passwords never enter this container).
+      RETRIVA_PG_MIGRATOR_PASSWORD: ${RETRIVA_PG_MIGRATOR_PASSWORD:-}
+      RETRIVA_PG_MIGRATOR_PASSWORD_FILE: ${RETRIVA_PG_MIGRATOR_PASSWORD_FILE:-}
+    depends_on:
+      retriva-pg-migrate:
+        condition: service_completed_successfully
+      retriva-pg-crm-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - retriva-net
+
+  # One-shot Messaging bootstrap (profiles: pro/messaging): the
+  # `retriva_messaging` runtime role and the Pro-owned `messaging`
+  # schema grants on the shared `retriva` database.
+  retriva-pg-messaging-bootstrap:
+    build:
+      context: ${RETRIVA_MESSAGING_DIR:-../retriva-messaging-extension}
+      dockerfile: ${RETRIVA_MESSAGING_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_MESSAGING_IMAGE:-retriva-messaging:local}
+    container_name: retriva-pg-messaging-bootstrap
+    restart: "no"
+    profiles: ["pro", "messaging"]
+    command: python scripts/bootstrap_postgres.py
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_PG_HOST: retriva-postgres
+      RETRIVA_PG_PORT: "5432"
+      RETRIVA_PG_DATABASE: ${RETRIVA_PG_DATABASE:-retriva}
+      RETRIVA_PG_SSLMODE: ${RETRIVA_PG_SSLMODE:-prefer}
+      RETRIVA_PG_ADMIN_USER: ${RETRIVA_PG_ADMIN_USER:-retriva_admin}
+      RETRIVA_PG_ADMIN_PASSWORD: ${RETRIVA_PG_ADMIN_PASSWORD:-}
+      RETRIVA_PG_ADMIN_PASSWORD_FILE: ${RETRIVA_PG_ADMIN_PASSWORD_FILE:-}
+      RETRIVA_PG_MIGRATOR_USER: ${RETRIVA_PG_MIGRATOR_USER:-retriva_migrator}
+      RETRIVA_MESSAGING_DB_USER: ${RETRIVA_MESSAGING_DB_USER:-retriva_messaging}
+      RETRIVA_MESSAGING_DB_PASSWORD: ${RETRIVA_MESSAGING_DB_PASSWORD:-}
+      RETRIVA_MESSAGING_DB_PASSWORD_FILE: ${RETRIVA_MESSAGING_DB_PASSWORD_FILE:-}
+    depends_on:
+      retriva-pg-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - retriva-net
+
+  # One-shot Messaging migration step (profiles: pro/messaging):
+  # applies Messaging's Alembic stream to the shared `retriva`
+  # database's `messaging` schema, as the migrator identity (the
+  # runtime role cannot run schema DDL).
+  retriva-pg-messaging-migrate:
+    build:
+      context: ${RETRIVA_MESSAGING_DIR:-../retriva-messaging-extension}
+      dockerfile: ${RETRIVA_MESSAGING_DOCKERFILE:-Dockerfile}
+    image: ${RETRIVA_MESSAGING_IMAGE:-retriva-messaging:local}
+    container_name: retriva-pg-messaging-migrate
+    restart: "no"
+    profiles: ["pro", "messaging"]
+    command: migrate
+    environment:
+      TZ: ${TZ:-UTC}
+      RETRIVA_MESSAGING_DATABASE_URL: postgresql+psycopg2://${RETRIVA_PG_MIGRATOR_USER:-retriva_migrator}:${RETRIVA_PG_MIGRATOR_PASSWORD:-}@retriva-postgres:5432/${RETRIVA_PG_DATABASE:-retriva}
+    depends_on:
+      retriva-pg-migrate:
+        condition: service_completed_successfully
+      retriva-pg-messaging-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - retriva-net
+
+  # pgAdmin for authorized operators (inspect/query/debug).  Binds to
+  # localhost by default; remote access requires an SSH tunnel, VPN,
+  # or an authenticated internal route.  Connect to PostgreSQL via
+  # the internal Docker hostname "retriva-postgres" (port 5432) using
+  # the retriva_pgadmin_operator role.
+  retriva-pgadmin:
+    image: ${RETRIVA_PGADMIN_IMAGE:-dpage/pgadmin4:9.18}
+    container_name: retriva-pgadmin
+    restart: unless-stopped
+    profiles: ["db", "pgadmin"]
+    ports:
+      - "${RETRIVA_PGADMIN_BIND_ADDR:-127.0.0.1}:${RETRIVA_PGADMIN_PORT:-5050}:80"
+    volumes:
+      - retriva_pgadmin_data:/var/lib/pgadmin
+      # Pre-registered internal server definition (no credentials).
+      - ./config/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    environment:
+      TZ: ${TZ:-UTC}
+      # Optional: defaults to ops@example.com when unset. Must be a
+      # valid, non-reserved domain (pgAdmin rejects e.g. .local).
+      PGADMIN_DEFAULT_EMAIL: ${RETRIVA_PGADMIN_UI_EMAIL:-ops@example.com}
+      # Set exactly ONE of the two in .env.
+      PGADMIN_DEFAULT_PASSWORD: ${RETRIVA_PGADMIN_UI_PASSWORD:-}
+      PGADMIN_DEFAULT_PASSWORD_FILE: ${RETRIVA_PGADMIN_UI_PASSWORD_FILE:-}
+      PGADMIN_DISABLE_POSTFIX: "1"
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "True"
+    depends_on:
+      retriva-postgres:
+        condition: service_healthy
     networks:
       - retriva-net
