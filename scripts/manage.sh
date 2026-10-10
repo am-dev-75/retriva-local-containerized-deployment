@@ -297,6 +297,11 @@ case "$COMMAND" in
 
   health)
     require_env
+    # Honour port overrides (GATEWAY_PORT, CORE_PORT, …) from the deployment
+    # env file; without this the shell environment is empty and the defaults
+    # below (written for a stock deployment) would probe the wrong ports on
+    # per-customer deployments such as cust_0007.
+    source "$ENV_FILE" 2>/dev/null || true
     echo "Qdrant:  http://localhost:${QDRANT_HTTP_PORT:-6333}/dashboard"
     curl -fsS "http://localhost:${QDRANT_HTTP_PORT:-6333}/" >/dev/null && echo "OK qdrant" || echo "FAIL qdrant"
     curl -fsS "http://localhost:${TIKA_PORT:-9998}/tika" >/dev/null && echo "OK tika" || echo "FAIL tika"
