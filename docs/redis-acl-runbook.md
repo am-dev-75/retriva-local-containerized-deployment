@@ -57,6 +57,45 @@ To exercise a reconnect (for example after a suspected dropped connection):
 5. Record the rotation in the operations log (role, time, actor); never
    record the secret value.
 
+## Rotation recovery when the ACL is rendered from the environment
+
+This deployment renders the ACL users at Redis container start from the
+deployment environment file (`config/redis/entrypoint.sh`).  The container
+environment is fixed at container creation, so an environment-file secret
+update does **not** change the live ACL until the Redis container itself is
+recreated: the running server keeps the previous generation, and any
+consumer already (re)created with the new secret fails with `WRONGPASS`
+(`invalid username-password pair or user is disabled`).  This is the
+observed failure mode when services are rolled to a rotated secret without
+recreating Redis.
+
+Recovery (configuration-driven; no live ACL administration):
+
+1. Identify the stale side by comparing secret fingerprints, never values:
+   the Redis container's environment versus the current deployment
+   environment file (`manage.sh` reads `.env` by default).  Confirm with
+   redacted authentication probes (hash and test each side's value without
+   printing it).
+2. Recreate only the Redis container from the current environment file,
+   preserving the persistent volume: `./scripts/manage.sh rebuild redis`
+   (compose `rm -f -s` + `up -d --no-deps`; the named volume is retained —
+   never remove it).
+3. Verify the ACL re-rendered from the current secrets: named-identity
+   `PING` probes pass for the current generation and fail for the retired
+   one.
+4. Consumers holding the previous generation reconnect through their retry
+   loops, or are rolled through the normal service manager if they do not.
+5. Verify data/queue preservation (DBSIZE and key-pattern aggregates
+   unchanged, apart from expected ephemeral metadata) and that no consumer
+   loops.
+6. Record the event (roles, time, actor); never record secret values.
+   Rollback: recreate Redis from the preserved previous-generation
+   environment snapshot (same volume).
+
+This rendered-ACL mode is the environment-file equivalent of the
+break-glass `ACL SETUSER` rotation above; when the ACL is not rendered from
+the environment, follow the break-glass procedure instead.
+
 ## Emergency (break-glass) identity workflow
 
 `rtrv-emergency` is disabled by default and has no password in the deployment
