@@ -43,6 +43,13 @@ groups:
         labels: {severity: warning, service: redis}
         annotations:
           summary: "Redis restart or persistence anomaly"
+      - alert: RedisUnackedBacklog
+        expr: redis_unacked_depth > 0
+        for: 10m
+        labels: {severity: warning, service: redis}
+        annotations:
+          summary: "Redis unacked backlog persists"
+          description: "Unacked_index depth above zero for 10 minutes; check worker health/redelivery."
       - alert: RedisEmergencyIdentityUse
         expr: increase(redis_acl_emergency_use_total[5m]) > 0
         labels: {severity: critical, service: redis}

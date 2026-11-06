@@ -243,7 +243,7 @@ def test_metric_contract_documents_labels_and_forbidden_data():
 def test_redis_rule_group_shape():
     rules = _rules(RULES / "redis-security.rules.yml")
     by_name = {rule["alert"]: rule for rule in rules}
-    assert len(by_name) == 9
+    assert len(by_name) == 10
     for name in (
         "RedisDeniedDestructiveCommand",
         "RedisAuthFailuresAboveBaseline",
@@ -254,6 +254,7 @@ def test_redis_rule_group_shape():
         "RedisRestartOrPersistenceAnomaly",
         "RedisEmergencyIdentityUse",
         "RedisDefaultOrNopassAuthSuccess",
+        "RedisUnackedBacklog",
     ):
         rule = by_name[name]
         assert rule["for"], name

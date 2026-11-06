@@ -258,3 +258,26 @@ tests:
       - eval_time: 50m
         alertname: RedisRestartOrPersistenceAnomaly
         exp_alerts: []
+  - name: A8-unacked-backlog
+    interval: 1m
+    input_series:
+      - series: 'redis_unacked_depth'
+        values: '0x5 1x20 0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: RedisUnackedBacklog
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: RedisUnackedBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: redis
+              owner: monitoring-stack-owner
+            exp_annotations:
+              summary: "Redis unacked backlog persists"
+              description: "The unacked_index depth has remained above zero for 10 minutes; check worker health and the established worker-loss redelivery behavior."
+              runbook: "docs/monitoring-runbook.md#key-queue-unacked-disappearance-alert"
+      - eval_time: 35m
+        alertname: RedisUnackedBacklog
+        exp_alerts: []

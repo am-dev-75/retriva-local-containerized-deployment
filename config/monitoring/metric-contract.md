@@ -19,6 +19,7 @@ tenant/job/task/document identifiers. Label values are bounded enumerations.
 | `redis_queue_depth` | gauge | `queue` ∈ {ingestion} | `LLEN` | 0 when idle | grows with backlog |
 | `redis_unacked_present` | gauge | – | `EXISTS unacked` | 0 | 1 while deliveries are unacknowledged |
 | `redis_unacked_index_present` | gauge | – | `EXISTS unacked_index` | 0 | 1 while the unacked index exists |
+| `redis_unacked_depth` | gauge | – | `ZCARD unacked_index` | 0 | > 0 for a bounded window ⇒ worker-loss/redelivery review |
 | `redis_binding_sets` | gauge | – | `SCAN _kombu.binding.*` count | 3 in the steady hardened stack | drops on reset/queue loss |
 | `redis_binding_recreation_events_total` | counter | – | membership additions across binding sets | near 0 in steady state | jumps on Redis reset/restart/topology churn |
 | `redis_result_records_total` | gauge | – | `SCAN celery-task-meta-*` count (bounded pages) | small and TTL-bound | collapse beyond TTL behaviour ⇒ alert |
@@ -29,11 +30,11 @@ tenant/job/task/document identifiers. Label values are bounded enumerations.
 | `redis_acl_default_usable` | gauge | – | `ACL DRYRUN default PING` | 0 | 1 means the default user is usable |
 | `redis_rdb_last_bgsave_status` | gauge | – | `INFO persistence` | 1 (ok) | 0 on persistence failure |
 
-Retrieval limitation (documented): exact unacked counts (`HLEN unacked`,
-`ZCARD unacked_index`) are unavailable under the accepted `rtrv-monitor`
-allowlist, which intentionally omits those commands. Presence (`redis_unacked_*`)
-plus queue depth, key counts, and binding metrics provide the accepted A3
-correlation semantics; no ACL change is made to obtain counts.
+Retrieval limitation (documented): `redis_unacked_depth` provides the exact
+`ZCARD unacked_index` backlog depth; the monitor was granted `+zcard` only
+(2026-11-06). `ZRANGE` remains denied so message payloads are never exposed,
+and `HLEN unacked` remains unavailable. The queue-depth/key-count/binding
+metrics plus `redis_unacked_depth` provide the A3 correlation semantics.
 
 Counter semantics: ACL LOG counters adopt pre-existing entries without counting
 them at exporter start and increment on observed growth; growth survives ACL

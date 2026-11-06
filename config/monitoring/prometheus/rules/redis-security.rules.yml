@@ -84,6 +84,17 @@ groups:
           summary: "Redis persistence anomaly"
           description: "Last RDB background save did not succeed; investigate persistence and disk health."
           runbook: "docs/monitoring-runbook.md#persistence-anomaly"
+      - alert: RedisUnackedBacklog
+        expr: redis_unacked_depth > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: redis
+          owner: monitoring-stack-owner
+        annotations:
+          summary: "Redis unacked backlog persists"
+          description: "The unacked_index depth has remained above zero for 10 minutes; check worker health and the established worker-loss redelivery behavior."
+          runbook: "docs/monitoring-runbook.md#key-queue-unacked-disappearance-alert"
       - alert: RedisEmergencyIdentityUse
         expr: increase(redis_acl_emergency_use_total[5m]) > 0
         for: 1m

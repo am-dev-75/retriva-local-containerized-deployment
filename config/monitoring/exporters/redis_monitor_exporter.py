@@ -302,6 +302,8 @@ class Exporter:
               1 if client.command("EXISTS", "unacked") == 1 else 0)
         m.set("redis_unacked_index_present",
               1 if client.command("EXISTS", "unacked_index") == 1 else 0)
+        m.set("redis_unacked_depth",
+              float(client.command("ZCARD", "unacked_index")))
         # binding churn
         binding_keys = client.scan_match("_kombu.binding.*")
         current = {}
