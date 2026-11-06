@@ -50,6 +50,18 @@ case "$cmd" in
         # Safe aggregate: users and rules with password hashes redacted.
         R ACL LIST | sed -E 's/>[^ ]+/>[redacted]/g; s/#[0-9a-f]+/#[redacted]/g'
         ;;
+    unacked)
+        # Read-only pre/post baseline.  The monitor role intentionally has
+        # no ZCARD/ZRANGE on the broker's unacked_index; EXISTS=1 proves a
+        # non-empty sorted set (Redis removes empty zsets), and LLEN/DBSIZE
+        # capture the queue/keyspace side.  Never grant monitor broker-key
+        # reads without a separate least-privilege review.
+        echo "unacked_index_exists:"; R EXISTS unacked_index
+        echo "unacked_index_type:"; R TYPE unacked_index 2>/dev/null || true
+        echo "unacked_index_ttl:"; R TTL unacked_index 2>/dev/null || true
+        echo "ingestion_queue_depth:"; R LLEN ingestion 2>/dev/null || echo "(denied or absent)"
+        echo "dbsize:"; R DBSIZE
+        ;;
     verify-acl)
         # Every denial check uses ACL DRYRUN with an arity-valid argument
         # vector (ACL DRYRUN validates arity before permissions). No
@@ -104,16 +116,31 @@ case "$cmd" in
         expect denied rtrv-broker eval 'return 1' 0
         expect allowed rtrv-broker evalsha 0000000000000000000000000000000000000000 0
         expect allowed rtrv-broker script load 'return 1'
+        expect allowed rtrv-broker script exists 0000000000000000000000000000000000000000
         expect allowed rtrv-broker set unacked_mutex probe
         expect allowed rtrv-broker get unacked_mutex
         expect allowed rtrv-broker llen ingestion
         expect allowed rtrv-broker watch unacked
         expect allowed rtrv-broker rpush ingestion probe
+        expect allowed rtrv-broker brpop ingestion 1
+        expect allowed rtrv-broker time
+        expect allowed rtrv-broker exists ingestion
+        expect allowed rtrv-broker pexpire ingestion 1000
+        expect allowed rtrv-broker sadd _kombu.binding_permanent.ingestion x
+        expect allowed rtrv-broker zadd _kombu.binding_deadlines 1 x
+        # Celery/Kombu 5.7.0 restore_visible: ZRANGE ... BYSCORE REV.
+        expect allowed rtrv-broker zrange unacked_index 0 -1
+        # Results-backend commands used by simple ingestion tasks.
+        expect allowed rtrv-results setex celery-task-meta-probe 60 x
+        expect allowed rtrv-results get celery-task-meta-probe
+        expect allowed rtrv-results expire celery-task-meta-probe 60
+        expect allowed rtrv-results del celery-task-meta-probe
         expect denied rtrv-monitor acl setuser probe
         expect denied rtrv-monitor acl deluser probe
         expect denied rtrv-monitor config set maxmemory 0
         echo "cross-role key-pattern isolation:"
         expect denied rtrv-broker brpop celery-task-meta-probe 1
+        expect denied rtrv-broker del celery-task-meta-probe
         expect denied rtrv-broker rpush result:probe 1
         expect denied rtrv-results set ingestion probe
         expect denied rtrv-results rpush ingestion probe

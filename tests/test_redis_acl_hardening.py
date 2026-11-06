@@ -156,6 +156,7 @@ def test_scripting_grant_is_broker_only_and_bounded():
     broker = lines["rtrv-broker"]
     assert "+evalsha" in broker
     assert "+script|load" in broker
+    assert "+script|exists" in broker
     for forbidden in ("+eval ", "+script ", "script|flush", "script|kill"):
         assert forbidden not in broker + " ", forbidden
     for user in ("rtrv-results", "rtrv-monitor", "rtrv-health"):
@@ -169,7 +170,9 @@ def test_broker_mutex_and_queue_commands():
     broker = next(line for line in TEMPLATE.read_text().splitlines()
                   if line.startswith("user rtrv-broker on "))
     for cmd in ("+get", "+set", "+llen", "+watch", "+unwatch", "+lpush",
-                "+rpush", "+evalsha", "+script|load"):
+                "+rpush", "+brpop", "+evalsha", "+script|load",
+                "+zrange", "+time", "+exists", "+pexpire",
+                "+script|exists"):
         assert f"{cmd} " in broker + " ", cmd
     monitor = next(line for line in TEMPLATE.read_text().splitlines()
                    if line.startswith("user rtrv-monitor on "))
@@ -181,12 +184,51 @@ def test_broker_mutex_and_queue_commands():
     assert "+acl" not in health
 
 
+def test_broker_zrange_for_kombu_restore_visible():
+    """Incident 2026-11-06: Celery/Kombu 5.7.0 restore_visible issues
+    ZRANGE ... BYSCORE REV on unacked_index (kombu/transport/redis.py:542);
+    the legacy ZREVRANGEBYSCORE grant alone caused a startup crash-loop."""
+    broker = next(line for line in TEMPLATE.read_text().splitlines()
+                  if line.startswith("user rtrv-broker on "))
+    assert "+zrange " in broker + " "
+    # Legacy grants remain for rollback / older kombu, not removed.
+    assert "+zrevrangebyscore" in broker
+    assert "+zrangebyscore" in broker
+    # The rest of the destructive posture is unchanged.
+    for denied in DENIED_COMMANDS:
+        assert f"+{denied} " not in broker + " ", denied
+    runbook = RUNBOOK.read_text()
+    assert "zrange" in runbook.lower()
+    assert "binding_deadlines" in runbook
+    assert "2026-11-06" in runbook
+    assert "restore_visible" in runbook
+
+
+def test_results_backend_command_set_for_celery_5_7():
+    """Celery 5.7.0's Redis result backend issues setex/set/get/mget/del/
+    expire/publish/subscribe/unsubscribe on celery-task-meta-*; all are
+    granted. incr and the chord scripts are chord/group-only and are not
+    granted for the simple ingestion-task path (residual risk recorded in
+    the runbook)."""
+    results = next(line for line in TEMPLATE.read_text().splitlines()
+                   if line.startswith("user rtrv-results on "))
+    for cmd in ("+get", "+mget", "+set", "+setex", "+del", "+expire",
+                "+publish", "+subscribe", "+unsubscribe"):
+        assert f"{cmd} " in results + " ", cmd
+    assert "+evalsha" not in results
+    assert "+script|load" not in results
+    assert "~celery-task-meta-*" in results
+    assert "~ingestion" not in results
+
+
 def test_broker_and_results_scopes():
     broker = next(line for line in TEMPLATE.read_text().splitlines()
                   if line.startswith("user rtrv-broker on "))
     results = next(line for line in TEMPLATE.read_text().splitlines()
                    if line.startswith("user rtrv-results on "))
-    for pattern in ("~ingestion* ", "~_kombu.binding.*", "~unacked ",
+    for pattern in ("~ingestion* ", "~_kombu.binding.*",
+                    "~_kombu.binding_permanent.*",
+                    "~_kombu.binding_deadlines ", "~unacked ",
                     "~unacked_index", "~unacked_mutex",
                     "~*.celery.pidbox*", "~celeryev.*"):
         assert pattern in broker
