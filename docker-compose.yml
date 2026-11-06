@@ -948,10 +948,8 @@ services:
       - -c
       - |
         set -e
-        for i in $$(seq 1 60); do
-          php -r 'exit(@mysqli_connect(getenv("MW_DB_HOST"),getenv("MW_DB_USER"),getenv("MW_DB_PASSWORD"),getenv("MW_DB_NAME"),3306)?0:1);' && break
-          echo "waiting for mediawiki database ($$i)"; sleep 2
-        done
+        # The mediawiki-local-db service is gated by depends_on:
+        # condition: service_healthy, so no arbitrary sleep loop is needed.
         if [ ! -f /config/LocalSettings.php ]; then
           php /var/www/html/maintenance/install.php \
             --dbtype mysql --dbserver "$$MW_DB_HOST" --dbname "$$MW_DB_NAME" \
