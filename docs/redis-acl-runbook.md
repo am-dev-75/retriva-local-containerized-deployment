@@ -132,19 +132,40 @@ Findings from the isolated Spec 034 validation matrix (disposable stack,
 exact versions Redis 7.4.10 / Celery 5.6.3 / Kombu 5.6.2 / redis-py 6.4.0);
 `scripts/redis-ops.sh verify-acl` encodes the same checks and must stay green.
 
+**2026-11-06 amendment (Celery 5.7.0 / Kombu 5.7.0 / redis-py 8.1.0).**
+Kombu's `QoS.restore_visible` now issues `ZRANGE unacked_index ... BYSCORE
+REV` (`kombu/transport/redis.py:542`) instead of `ZREVRANGEBYSCORE`; the
+`rtrv-broker` role grants `+zrange`. The same upgrade introduced the
+binding-deadline scripts (`REFRESH_BINDING` / `SWEEP_BINDINGS`), which issue
+`TIME`, `SADD`, `ZADD`, `ZRANGEBYSCORE`, `EXISTS`, `DEL`, and `ZREM` on
+`_kombu.binding.*`, `_kombu.binding_permanent.*`, and
+`_kombu.binding_deadlines`; the broker grants `+time`, `+exists`, `+pexpire`,
+`+script|exists` (redis-py checks SCRIPT EXISTS before loading a registered
+script), and those exact key patterns. `PEXPIRE` is needed when publishing to an
+expiring queue such as the pidbox reply queue. The legacy `+zrevrangebyscore`
+and `+zrangebyscore` grants remain for rollback and older kombu. The worker
+crash-loop (`NoPermissionError: User rtrv-broker has no permissions to run
+the 'zrange' command`) was caused by the image upgrade, not by leftover
+unacked entries: `unacked_index` was absent at incident time, but
+`restore_visible` issues the command unconditionally at startup.
+
 - The worker's late-acknowledgement restore path needs the broker identity to
   run `WATCH`/`MULTI`/`EXEC` on `unacked`, `LLEN`, `RPUSH`, `HSET`/`HGET`/
-  `HDEL`, `ZADD`/`ZREM`/`ZREVRANGEBYSCORE` on `unacked_index`, plus the
-  unacked-restoration mutex (`SET`/`GET`/`DEL` on `unacked_mutex`).
+  `HDEL`, `ZADD`/`ZREM`/`ZRANGE`/`ZREVRANGEBYSCORE` on `unacked_index`, plus
+  the unacked-restoration mutex (`SET`/`GET`/`DEL` on `unacked_mutex`).
+  Binding maintenance additionally needs `TIME`/`EXISTS`/`SADD`/`ZADD`/
+  `ZRANGEBYSCORE`/`DEL`/`ZREM` on the `_kombu.binding*` keys and `PEXPIRE`
+  on expiring queue keys.
 - Kombu's mutex releases a redis-py `Lock`, which requires `EVALSHA` +
   `SCRIPT LOAD` with the redis-py release script
   (sha1 `c3f8721cbb97f72bc19e972846bd7aaf91901658`). These are granted to
   `rtrv-broker` only, and only because Redis 7 enforces the calling user's
   ACLs for commands invoked inside Lua scripts: a loaded script cannot exceed
   the broker allowlist (verified by attempting an in-script `FLUSHALL`, which
-  is blocked). Plain `EVAL` and `SCRIPT FLUSH|KILL` remain denied for all
-  identities. `rtrv-results`, `rtrv-monitor`, and `rtrv-health` have no
-  scripting.
+  is blocked). redis-py also needs the read-only `SCRIPT EXISTS` to decide
+  whether to load the cached script; it is granted with `SCRIPT LOAD`.
+  Plain `EVAL` and `SCRIPT FLUSH|KILL` remain denied for all identities.
+  `rtrv-results`, `rtrv-monitor`, and `rtrv-health` have no scripting.
 - Queue keys include kombu priority variants (`ingestion*`), the pidbox
   mailboxes and reply queues (`*.celery.pidbox*`, `celeryev.*`), and the
   `_kombu.binding.*` exchange sets; fanout channels are `/0.`-prefixed under
@@ -153,6 +174,16 @@ exact versions Redis 7.4.10 / Celery 5.6.3 / Kombu 5.6.2 / redis-py 6.4.0);
   the worker's event receiver subscribes with `/0.celeryev/worker.*`, so that
   literal channel pattern is in the broker allowlist (a broader
   `/0.celeryev/*` alone is not sufficient for it).
+- The Celery 5.7.0 Redis result backend issues `SETEX`/`SET`/`GET`/`MGET`/
+  `DEL`/`EXPIRE`/`PUBLISH`/`SUBSCRIBE`/`UNSUBSCRIBE` on `celery-task-meta-*`;
+  all are granted to `rtrv-results`. `INCR` and the chord scripts are
+  chord/group-only and remain ungranted for the simple ingestion-task path
+  (residual risk: a future chord/group workload needs a separate
+  least-privilege review).
+- The monitor identity intentionally lacks `ZCARD`/`ZRANGE` on
+  `unacked_index`; use `EXISTS`/`TYPE`/`TTL` plus `LLEN`/`DBSIZE` for the
+  pre/post baseline. Do not grant the monitor broker-key reads without a
+  separate least-privilege review.
 - `RESET` cannot be ACL-restricted: Redis treats it as a no-auth connection
   command. Its only effect is connection-local (it resets the caller's own
   session state and de-authenticates it); it cannot modify data or server
