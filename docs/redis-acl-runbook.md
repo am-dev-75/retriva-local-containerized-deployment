@@ -153,6 +153,8 @@ unacked entries: `unacked_index` was absent at incident time, but
   run `WATCH`/`MULTI`/`EXEC` on `unacked`, `LLEN`, `RPUSH`, `HSET`/`HGET`/
   `HDEL`, `ZADD`/`ZREM`/`ZRANGE`/`ZREVRANGEBYSCORE` on `unacked_index`, plus
   the unacked-restoration mutex (`SET`/`GET`/`DEL` on `unacked_mutex`).
+  Pubsub teardown uses `PUNSUBSCRIBE` as well as `UNSUBSCRIBE` (the ACL LOG
+  proved the former was missing after the 5.7 upgrade; it is now granted).
   Binding maintenance additionally needs `TIME`/`EXISTS`/`SADD`/`ZADD`/
   `ZRANGEBYSCORE`/`DEL`/`ZREM` on the `_kombu.binding*` keys and `PEXPIRE`
   on expiring queue keys.
@@ -180,10 +182,35 @@ unacked entries: `unacked_index` was absent at incident time, but
   chord/group-only and remain ungranted for the simple ingestion-task path
   (residual risk: a future chord/group workload needs a separate
   least-privilege review).
-- The monitor identity intentionally lacks `ZCARD`/`ZRANGE` on
-  `unacked_index`; use `EXISTS`/`TYPE`/`TTL` plus `LLEN`/`DBSIZE` for the
-  pre/post baseline. Do not grant the monitor broker-key reads without a
-  separate least-privilege review.
+- The monitor identity has `ZCARD` on `unacked_index` (aggregate depth only)
+  and still lacks `ZRANGE` (payload exposure); use `EXISTS`/`TYPE`/`TTL`
+  plus `LLEN`/`DBSIZE` for the pre/post baseline. Any broader monitor
+  broker-key read needs a separate least-privilege review.
+
+### 2026-11-06 residual-risk review (R1/R2/R3)
+
+- **R1 — broker RPOP/SELECT (deliberate deny).** No current code path uses
+  synchronous `basic_get` (`RPOP`) or a non-zero broker DB; the worker
+  consumes with `BRPOP` on DB 0. If a future path needs one, request exactly
+  `+rpop` on the specific queue key, or move the broker URL to the required
+  DB with `+select` plus a key-pattern review. Detection: growth of
+  `redis_acl_denied_commands_total{category="other",role="broker"}` and the
+  corresponding ACL LOG entry (the exporter already classifies non-listed
+  denials as `category=other`).
+- **R2 — results INCR/chord scripts (deliberate deny).** The simple
+  ingestion result path uses `SETEX`/`SET`/`GET`/`MGET`/`DEL`/`EXPIRE`/
+  `PUBLISH`/`SUBSCRIBE`/`UNSUBSCRIBE` only. Celery `group`/`chord` is not
+  used. A future chord/group workload needs `+incr`, `+evalsha`,
+  `+script|load`, and `+script|exists` on the results role (plus the chord
+  key patterns) under a separate prove-then-grant review. Detection:
+  `redis_acl_denied_commands_total{category="other",role="results"}` and the
+  ACL LOG.
+- **R3 — monitor unacked depth.** `rtrv-monitor` now has `+zcard` (only), so
+  `redis_unacked_depth` reports the `unacked_index` backlog cardinality.
+  `ZRANGE` remains denied to avoid exposing message payloads. Alert when the
+  gauge is persistently > 0 for 10 minutes (`RedisUnackedBacklog`); correlate
+  with the established worker-loss redelivery behaviour.
+
 - `RESET` cannot be ACL-restricted: Redis treats it as a no-auth connection
   command. Its only effect is connection-local (it resets the caller's own
   session state and de-authenticates it); it cannot modify data or server

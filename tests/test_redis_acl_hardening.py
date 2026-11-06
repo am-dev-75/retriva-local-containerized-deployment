@@ -172,7 +172,7 @@ def test_broker_mutex_and_queue_commands():
     for cmd in ("+get", "+set", "+llen", "+watch", "+unwatch", "+lpush",
                 "+rpush", "+brpop", "+evalsha", "+script|load",
                 "+zrange", "+time", "+exists", "+pexpire",
-                "+script|exists"):
+                "+script|exists", "+punsubscribe"):
         assert f"{cmd} " in broker + " ", cmd
     monitor = next(line for line in TEMPLATE.read_text().splitlines()
                    if line.startswith("user rtrv-monitor on "))
@@ -219,6 +219,41 @@ def test_results_backend_command_set_for_celery_5_7():
     assert "+script|load" not in results
     assert "~celery-task-meta-*" in results
     assert "~ingestion" not in results
+
+
+def test_monitor_unacked_depth_zcard_only():
+    """The monitor may read the unacked_index cardinality (+zcard) but must
+    never read its members (+zrange), which would expose message payloads."""
+    monitor = next(line for line in TEMPLATE.read_text().splitlines()
+                   if line.startswith("user rtrv-monitor on "))
+    assert "+zcard " in monitor + " "
+    assert "+zrange " not in monitor + " "
+    runbook = RUNBOOK.read_text()
+    assert "redis_unacked_depth" in runbook
+    assert "zrange" in runbook.lower()
+
+
+def test_broker_deliberate_denials_rpop_select():
+    """R1 (2026-11-06): no current code path uses synchronous basic_get
+    (RPOP) or a non-zero broker DB (SELECT); deny-by-default is deliberate.
+    A future path needs a separate prove-then-grant review."""
+    broker = next(line for line in TEMPLATE.read_text().splitlines()
+                  if line.startswith("user rtrv-broker on "))
+    assert "+rpop " not in broker + " "
+    assert "+select " not in broker + " "
+    assert "~ingestion*" in broker  # broker DB is 0; no cross-DB grant
+
+
+def test_results_deliberate_denials_incr_and_chord_scripts():
+    """R2 (2026-11-06): no current code path uses Celery group/chord
+    (INCR and the chord Lua scripts); the simple ingestion result path only
+    needs setex/set/get/mget/del/expire/publish/subscribe/unsubscribe.
+    A future chord/group workload needs a separate prove-then-grant review."""
+    results = next(line for line in TEMPLATE.read_text().splitlines()
+                   if line.startswith("user rtrv-results on "))
+    for denied in ("+incr", "+evalsha", "+script|load", "+script|exists",
+                   "+scan"):
+        assert f"{denied} " not in results + " ", denied
 
 
 def test_broker_and_results_scopes():

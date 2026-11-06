@@ -130,11 +130,21 @@ case "$cmd" in
         expect allowed rtrv-broker zadd _kombu.binding_deadlines 1 x
         # Celery/Kombu 5.7.0 restore_visible: ZRANGE ... BYSCORE REV.
         expect allowed rtrv-broker zrange unacked_index 0 -1
+        expect allowed rtrv-broker punsubscribe
+        # R1 deliberate denials: no synchronous basic_get / non-zero broker DB.
+        expect denied rtrv-broker rpop ingestion
+        expect denied rtrv-broker select 0
         # Results-backend commands used by simple ingestion tasks.
         expect allowed rtrv-results setex celery-task-meta-probe 60 x
         expect allowed rtrv-results get celery-task-meta-probe
         expect allowed rtrv-results expire celery-task-meta-probe 60
         expect allowed rtrv-results del celery-task-meta-probe
+        # R2 deliberate denials: no Celery group/chord in the current path.
+        expect denied rtrv-results incr celery-task-meta-probe
+        expect denied rtrv-results scan 0
+        # R3: monitor may read the unacked cardinality, not its members.
+        expect allowed rtrv-monitor zcard unacked_index
+        expect denied rtrv-monitor zrange unacked_index 0 -1
         expect denied rtrv-monitor acl setuser probe
         expect denied rtrv-monitor acl deluser probe
         expect denied rtrv-monitor config set maxmemory 0
